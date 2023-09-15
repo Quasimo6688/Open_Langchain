@@ -1,6 +1,4 @@
-import faiss
 import numpy as np
-import openai
 from transformers import GPT2Tokenizer
 import time
 import os
@@ -13,19 +11,27 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.document_loaders import Docx2txtLoader
-from transformers import GPT2Tokenizer
 from langchain import OpenAI, LLMChain, PromptTemplate
 
-# 读取配置文件
+# 获取当前脚本的绝对路径的目录部分
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 使用相对路径来确定其他文件的绝对路径
+api_key_file_path = os.path.join(script_dir, 'api_key.txt')
+faiss_index_path = os.path.join(script_dir, 'faiss_index.index')
+embeddings_path = os.path.join(script_dir, 'embeddings.npy')
+metadata_path = os.path.join(script_dir, 'metadata.json')
+
+# 初始化日志和配置
+logging.basicConfig(level=logging.INFO)
 config = configparser.ConfigParser()
-config.read('config.ini')
+config.read(os.path.join(script_dir, 'config.ini'))  # 使用相对路径读取配置文件
+
+# 从配置文件中读取设置
 api_key_file_path = config.get('Settings', 'api_key_file_path')
 faiss_index_path = config.get('Settings', 'faiss_index_path')
 embeddings_path = config.get('Settings', 'embeddings_path')
 metadata_path = config.get('Settings', 'metadata_path')
-
-# 初始化日志
-logging.basicConfig(level=logging.INFO)
 
 # 初始化GPT-2分词器
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
@@ -41,20 +47,6 @@ openai.api_key = api_key
 # 初始化变量
 REQUEST_DELAY_SECONDS = 2
 DEBUG = False  # 用于控制是否打印日志
-
-
-
-#测试函数测试函数测试函数测试函数测试函数测试函数测试函数测试函数测试函数
-
-
-
-
-
-
-
-#测试函数测试函数测试函数测试函数测试函数测试函数测试函数测试函数测试函数测试函数
-
-
 
 # 逐字符打印答案的函数
 def print_char_by_char(answer):
