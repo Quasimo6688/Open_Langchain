@@ -14,6 +14,7 @@ from langchain.document_loaders import Docx2txtLoader
 from langchain import OpenAI, LLMChain, PromptTemplate
 from langchain.schema import (AIMessage,HumanMessage,SystemMessage)
 from langchain.text_splitter import CharacterTextSplitter
+from langchain.agents import YourChosenAgent
 
 # 获取当前脚本的绝对路径的目录部分
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +24,9 @@ api_key_file_path = os.path.join(script_dir, 'api_key.txt')
 faiss_index_path = os.path.join(script_dir, 'faiss_index.index')
 embeddings_path = os.path.join(script_dir, 'embeddings.npy')
 metadata_path = os.path.join(script_dir, 'metadata.json')
+
+# 初始化 Agent
+agent = YourChosenAgent(parameters)
 
 # 初始化日志和配置
 logging.basicConfig(level=logging.INFO)
@@ -66,15 +70,11 @@ def create_embedding(text):
     )
     return response['data'][0]['embedding']
 
-# 问GPT-3的函数
-def ask_gpt(prompt):
-    model_engine = "gpt-3.5-turbo"
-    response = openai.Completion.create(
-        model=model_engine,
-        prompt=prompt,
-        max_tokens=3000
-    )
-    return response.choices[0].text.strip()
+# 修改 ask_gpt 函数
+def ask_gpt_with_agent(prompt):
+    # 使用 Langchain 的 Agent 来获取答案
+    response = agent.ask(prompt, knowledge_base)
+    return response
 
 # 读取Faiss索引和嵌入
 index = faiss.read_index(faiss_index_path)
@@ -86,9 +86,9 @@ with open(metadata_path, 'r', encoding='utf-8') as f:
 
 # 主逻辑
 while True:
-    print("=================会话开始(输入“退出”结束会话)==================\n")
     question = input("问：")
-    total_tokens = 0  # 将这一行移动到这里
+
+    total_tokens = 0  #
 
     # 控制日志打印
     if question.lower() == '打印日志':
@@ -134,9 +134,10 @@ while True:
     combined_text = " ".join(cleaned_matches)
     prompt = f"你是一个根据专业知识库回答问题的AI助手，优先参考以下双引号以内的开发文档内容进行回答，如不能回答或是开发文档内容和问题关联度过低则按照你的想法回答:\n“{combined_text}”\n\n注意语言的自然和专业，不要回答与问题无关的内容\n我的问题是：{question}"
     time.sleep(REQUEST_DELAY_SECONDS)
-    answer = ask_gpt(prompt)
+    # 使用新的 ask_gpt_with_agent 函数
+    answer = ask_gpt_with_agent(prompt)
 
-    print("答：")
+    print("答：", answer)
     print_char_by_char(answer)
     print("\n=================会话结束(输入“退出”结束会话)==================\n")
 
