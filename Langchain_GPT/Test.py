@@ -17,7 +17,7 @@ from langchain import OpenAI, LLMChain, PromptTemplate
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 
 # 假设这些是你可能需要的 Langchain Agents 和其他组件
-from langchain.agents import ComplexAgent, SpecificAgent1, SpecificAgent2  # 请根据实际情况替换
+from langchain.agents import ComplexAgent
 from langchain.model_io import ModelIO  # 用于与语言模型交互
 from langchain.retrieval import Retrieval  # 用于数据检索
 from langchain.chains import Chains  # 用于构建调用序列
@@ -36,8 +36,6 @@ metadata_path = os.path.join(script_dir, 'metadata.json')
 
 # 初始化可能需要的 Agents 和其他组件
 complex_agent = ComplexAgent(parameters_for_ComplexAgent)
-specific_agent1 = SpecificAgent1(parameters_for_SpecificAgent1)
-specific_agent2 = SpecificAgent2(parameters_for_SpecificAgent2)
 model_io = ModelIO(parameters_for_ModelIO)
 retrieval = Retrieval(parameters_for_Retrieval)
 chains = Chains(parameters_for_Chains)
