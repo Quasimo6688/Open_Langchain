@@ -30,14 +30,6 @@ agent = YourChosenAgent(parameters)
 
 # 初始化日志和配置
 logging.basicConfig(level=logging.INFO)
-config = configparser.ConfigParser()
-config.read(os.path.join(script_dir, 'config.ini'))  # 使用相对路径读取配置文件
-
-# 从配置文件中读取设置
-api_key_file_path = config.get('Settings', 'api_key_file_path')
-faiss_index_path = config.get('Settings', 'faiss_index_path')
-embeddings_path = config.get('Settings', 'embeddings_path')
-metadata_path = config.get('Settings', 'metadata_path')
 
 # 初始化GPT-2分词器
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
