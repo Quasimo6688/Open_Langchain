@@ -12,6 +12,8 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.document_loaders import Docx2txtLoader
 from langchain import OpenAI, LLMChain, PromptTemplate
+from langchain.schema import (AIMessage,HumanMessage,SystemMessage)
+from langchain.text_splitter import CharacterTextSplitter
 
 # 获取当前脚本的绝对路径的目录部分
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,7 +68,7 @@ def create_embedding(text):
 
 # 问GPT-3的函数
 def ask_gpt(prompt):
-    model_engine = "text-davinci-003"
+    model_engine = "gpt-3.5-turbo"
     response = openai.Completion.create(
         model=model_engine,
         prompt=prompt,
