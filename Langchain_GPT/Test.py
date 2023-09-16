@@ -13,12 +13,12 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.document_loaders import Docx2txtLoader
-from langchain import OpenAI, LLMChain, PromptTemplate
+from langchain import LLMChain, PromptTemplate
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.chat_models import ChatOpenAI
 
 # 假设这些是你可能需要的 Langchain Agents 和其他组件
-from langchain.agents import ComplexAgent
-from langchain.model_io import ModelIO  # 用于与语言模型交互
+from langchain.agents import OpenAIFunctionsAgent# 用于与语言模型交互
 from langchain.retrieval import Retrieval  # 用于数据检索
 from langchain.chains import Chains  # 用于构建调用序列
 from langchain.memory import Memory  # 用于在链的运行之间保持应用状态
@@ -35,8 +35,7 @@ embeddings_path = os.path.join(script_dir, 'embeddings.npy')
 metadata_path = os.path.join(script_dir, 'metadata.json')
 
 # 初始化可能需要的 Agents 和其他组件
-complex_agent = ComplexAgent(parameters_for_ComplexAgent)
-model_io = ModelIO(parameters_for_ModelIO)
+complex_agent = OpenAIFunctionsAgent(parameters_for_OpenAIFunctionsAgent)
 retrieval = Retrieval(parameters_for_Retrieval)
 chains = Chains(parameters_for_Chains)
 memory = Memory(parameters_for_Memory)
@@ -48,6 +47,8 @@ logging.basicConfig(level=logging.INFO)
 # 初始化GPT-2分词器
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
+初始化Open_AI
+openai = ChatOpenAI(model_name="gpt-3.5-turbo")
 # 初始化OpenAI API
 try:
     with open(api_key_file_path, "r") as key_file:
