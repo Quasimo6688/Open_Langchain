@@ -3,18 +3,27 @@ from transformers import GPT2Tokenizer
 import time
 import os
 import json
-import logging  # 新增，用于日志功能
-import configparser  # 新增，用于读取配置文件
+import logging  # 用于日志功能
+import configparser  # 用于读取配置文件
 import nltk
 from nltk.corpus import wordnet
+
+# Langchain 相关导入
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.document_loaders import Docx2txtLoader
 from langchain import OpenAI, LLMChain, PromptTemplate
-from langchain.schema import (AIMessage,HumanMessage,SystemMessage)
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.agents import YourChosenAgent
+from langchain.schema import AIMessage, HumanMessage, SystemMessage
+
+# 假设这些是你可能需要的 Langchain Agents 和其他组件
+from langchain.agents import ComplexAgent, SpecificAgent1, SpecificAgent2  # 请根据实际情况替换
+from langchain.model_io import ModelIO  # 用于与语言模型交互
+from langchain.retrieval import Retrieval  # 用于数据检索
+from langchain.chains import Chains  # 用于构建调用序列
+from langchain.memory import Memory  # 用于在链的运行之间保持应用状态
+from langchain.callbacks import Callbacks  # 用于记录和流式传输任何链的中间步骤
+
 
 # 获取当前脚本的绝对路径的目录部分
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -25,8 +34,15 @@ faiss_index_path = os.path.join(script_dir, 'faiss_index.index')
 embeddings_path = os.path.join(script_dir, 'embeddings.npy')
 metadata_path = os.path.join(script_dir, 'metadata.json')
 
-# 初始化 Agent
-agent = YourChosenAgent(parameters)
+# 初始化可能需要的 Agents 和其他组件
+complex_agent = ComplexAgent(parameters_for_ComplexAgent)
+specific_agent1 = SpecificAgent1(parameters_for_SpecificAgent1)
+specific_agent2 = SpecificAgent2(parameters_for_SpecificAgent2)
+model_io = ModelIO(parameters_for_ModelIO)
+retrieval = Retrieval(parameters_for_Retrieval)
+chains = Chains(parameters_for_Chains)
+memory = Memory(parameters_for_Memory)
+callbacks = Callbacks(parameters_for_Callbacks)
 
 # 初始化日志和配置
 logging.basicConfig(level=logging.INFO)
@@ -62,10 +78,10 @@ def create_embedding(text):
     )
     return response['data'][0]['embedding']
 
-# 修改 ask_gpt 函数
+# 在你的函数和逻辑中使用这些组件
 def ask_gpt_with_agent(prompt):
-    # 使用 Langchain 的 Agent 来获取答案
-    response = agent.ask(prompt, knowledge_base)
+    # 使用不同的 Agents 和组件来获取答案，根据需要
+    response = complex_agent.ask(prompt, knowledge_base)
     return response
 
 # 读取Faiss索引和嵌入
