@@ -1,13 +1,14 @@
 import numpy as np
-from transformers import GPT2Tokenizer
 import time
 import os
 import json
 import logging  # 用于日志功能
 import configparser  # 用于读取配置文件
 import nltk
-from nltk.corpus import wordnet
+import getpass
 
+from nltk.corpus import wordnet
+from transformers import GPT2Tokenizer
 # Langchain 相关导入
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
@@ -24,7 +25,11 @@ from langchain.chains import Chains  # 用于构建调用序列
 from langchain.memory import Memory  # 用于在链的运行之间保持应用状态
 from langchain.callbacks import Callbacks  # 用于记录和流式传输任何链的中间步骤
 
-
+#谷歌搜索功能加载项
+from langchain. agents import load_tools
+from langchain. agents import initialize_agent
+from langchain. llms import OpenAI
+from langchain. agents import AgentType
 # 获取当前脚本的绝对路径的目录部分
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,12 +39,6 @@ faiss_index_path = os.path.join(script_dir, 'faiss_index.index')
 embeddings_path = os.path.join(script_dir, 'embeddings.npy')
 metadata_path = os.path.join(script_dir, 'metadata.json')
 
-# 初始化可能需要的 Agents 和其他组件
-complex_agent = OpenAIFunctionsAgent(parameters_for_OpenAIFunctionsAgent)
-retrieval = Retrieval(parameters_for_Retrieval)
-chains = Chains(parameters_for_Chains)
-memory = Memory(parameters_for_Memory)
-callbacks = Callbacks(parameters_for_Callbacks)
 
 # 初始化日志和配置
 logging.basicConfig(level=logging.INFO)
