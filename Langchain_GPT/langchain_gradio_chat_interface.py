@@ -9,23 +9,30 @@ global_text_input = "" #声明全局输入
 # 在全局变量声明部分添加
 llm_function = None
 agent_output_str = ""
-
+log_output_str = ""
 bot_message = ""
 chat_history_global = []  # 添加一个全局变量来存储聊天历史
 
 
 def chat_function(message, chat_history, temperature):
     global global_text_input #声明全局变量
-    global log_output_str
+    global global_log_output_str
     global chat_history_global  # 引用全局的聊天历史
     global_text_input = message  # 更新全局变量的值
-    bot_message = llm_function()
-    # 将新的消息对添加到聊天历史中
-    chat_history_global.append((message, bot_message)) #添加本轮对话到聊天界面（某个默认内存？）
-    time.sleep(1)
 
-    agent_output = "这是代理的输出"
-    log_output = "这是日志信息"
+    #模拟流式输出逻辑
+    for bot_message, log_output in llm_to_UI():
+        if chat_history_global and chat_history_global[-1][0] == global_text_input:
+            user_message, prev_bot_message = chat_history_global[-1]
+            chat_history_global[-1] = (user_message, prev_bot_message + bot_message)
+        else:
+            chat_history_global.append((message, bot_message))
+
+        time.sleep(0.3)
+
+    chat_history_global.append((message, bot_message)) #添加本轮对话到聊天界面（某个默认内存？）
+
+    agent_output_str = "这是代理的输出"
 
     plt.figure(figsize=(4, 4))
     plt.text(0.5, 0.5, '示例图像', fontsize=12, ha='center')
@@ -38,7 +45,7 @@ def chat_function(message, chat_history, temperature):
     plt.axis('off')
     plt.savefig("question_image.png")
 
-    return "", chat_history_global, agent_output_str, log_output_str, ("question_image.png")
+    return "", chat_history_global, agent_output_str, log_output, ("question_image.png")
 
 
 #界面视觉设定：
@@ -103,10 +110,10 @@ with gr.Blocks(theme=theme) as ui:
         with gr.Column():
             example_image = gr.Image(label="示例图像")
             gr.Markdown("日志调试台.")
-            with gr.Tab("代理反应"):
-                agent_output_box = gr.Textbox(label="代理反应", lines=16)
             with gr.Tab("Langchain日志"):
                 log_output_box = gr.Textbox(label="Langchain日志", lines=16)
+            with gr.Tab("代理反应"):
+                agent_output_box = gr.Textbox(label="代理反应", lines=16)
 
 
             # 绑定事件处理函数到按钮

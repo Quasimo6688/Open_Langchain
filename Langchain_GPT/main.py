@@ -9,25 +9,28 @@ import openai
 import json
 
 from nltk.corpus import wordnet
-from transformers import GPT2Tokenizer
 # Langchain 相关导入
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain.schema import LLMResult
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.document_loaders import Docx2txtLoader
-from langchain import LLMChain, PromptTemplate
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain.chat_models import ChatOpenAI
 # 假设这些是你可能需要的 Langchain Agents 和其他组件
 from langchain.agents import OpenAIFunctionsAgent# 用于与语言模型交互
 
 #谷歌搜索功能加载项
-from langchain. agents import load_tools
-from langchain. agents import initialize_agent
-from langchain. llms import OpenAI
-from langchain. agents import AgentType
+from langchain.agents import load_tools
+from langchain.agents import initialize_agent
+from langchain.agents import AgentType
 from langchain.memory import ConversationBufferMemory #内存记忆模块
-import langchain_gradio_chat_interface #导入Gradio模块
+
+#导入Gradio模块相关内容
+import langchain_gradio_chat_interface
+from langchain_gradio_chat_interface import global_text_input
+
 
 global_finish_answer = "" #声明全局返回变量，这里用来存储模型最终回答,问题输入的全局变量在UI模块中已经声明。
 # 获取当前脚本的绝对路径的目录部分
@@ -40,11 +43,8 @@ embeddings_path = os.path.join(script_dir, 'embeddings.npy')#Langchain知识库�
 metadata_path = os.path.join(script_dir, 'metadata.json')#知识库元数据
 
 # 初始化日志和配置
-logging.basicConfig(level=logging.INFO)
-
-# 初始化GPT-2分词器
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+global_log_output_str = ""
 
 # 自动填写OpenAI API
 try:
@@ -52,23 +52,50 @@ try:
         api_key = key_file.read().strip()
 except FileNotFoundError:
     api_key = input("请输入您的OpenAI API密钥：")
-openai.api_key = api_key
+
 #初始化Open_AI
-chat = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+chat = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.5, openai_api_key=api_key, streaming=True, callbacks=[StreamingStdOutCallbackHandler()])
+
 # 初始化变量
-REQUEST_DELAY_SECONDS = 2
-DEBUG = False  # 用于控制是否打印日志
+REQUEST_DELAY_SECONDS = 1
+DEBUG = True  # 用于控制是否打印日志
+
+global_streaming_active = False # 流式输出状态标示
 
 def llm_to_UI():
     global global_finish_answer
     global global_text_input
-    # 创建一个系统消息
-    system_msg = SystemMessage(content="你是一个聊天助手，使用中文进行交流.")
-    gpt_response = chat([HumanMessage(content=global_text_input)])
-    # 将模型的答案存储在全局变量中
-    global_finish_answer = gpt_response.content
- # 返回LLM生成的文本内容
-    return global_finish_answer
+    global global_log_output_str
+    global global_streaming_active
+    global global_streaming_active
+    global_streaming_active = True
+    prev_answer = None
+    consecutive_no_changes = 0
+    global_log_output_str = ""  # 重置日志字符串
+    while global_streaming_active:
+        system_msg = [HumanMessage(content=global_text_input)]
+        gpt_response = chat(messages=system_msg)
+        global_finish_answer = gpt_response.content
+
+        log_message = f"模型回复: {gpt_response.content}"
+        logging.info(log_message)
+        global_log_output_str += log_message + "\n"
+
+        # 检查global_finish_answer是否有变化
+        if prev_answer == global_finish_answer:
+            consecutive_no_changes += 1
+        else:
+            prev_answer = global_finish_answer
+            consecutive_no_changes = 0
+
+        # 如果连续3次没有变化并且答案不为空，我们停止生成器
+        if consecutive_no_changes >= 3 and global_finish_answer:
+            global_streaming_active = False
+
+        yield global_finish_answer, global_log_output_str
+
+        # 在每次检查之前等待1秒
+        time.sleep(1) #在每次迭代之前等待2秒，然后检查global_finish_answer是否有变化。如果连续3次没有变化并且答案不为空，我们就停止生成器。这种方法应该可以缓解由于模型运算延迟或网络延迟引起的问题。
 
 #执行Gradio模块的界面启动函数
 langchain_gradio_chat_interface.start_UI(llm_to_UI)
