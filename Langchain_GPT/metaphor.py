@@ -28,7 +28,7 @@ output_contents = None  # 用于存储搜索结果，以便主程序或代理调
 
 # 主程序
 if __name__ == "__main__":
-    input_query = "Langchain技术"  # 这里模拟从主程序或代理接收到的查询
+    input_query = "ufo"  # 这里模拟从主程序或代理接收到的查询
     ids = search(input_query)
     output_contents = get_contents(ids)
     print("搜索结果内容：", output_contents)

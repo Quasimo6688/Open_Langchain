@@ -10,6 +10,7 @@ def search(query):
     wrapper = WikipediaAPIWrapper()
     output_summaries = wrapper.run(query)
 
+    return output_summaries
 # 主程序
 if __name__ == "__main__":
     input_query = "铁原战役"  # 这里模拟从主程序或代理接收到的查询

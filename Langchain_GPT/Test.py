@@ -30,6 +30,11 @@ from langchain. agents import load_tools
 from langchain. agents import initialize_agent
 from langchain. llms import OpenAI
 from langchain. agents import AgentType
+
+import langchain_gradio_chat_interface #导入Gradio模块
+
+langchain_gradio_chat_interface.start_UI() #Gradio模块界面启动函数
+
 # 获取当前脚本的绝对路径的目录部分
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -46,8 +51,9 @@ logging.basicConfig(level=logging.INFO)
 # 初始化GPT-2分词器
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
-初始化Open_AI
-openai = ChatOpenAI(model_name="gpt-3.5-turbo")
+#初始化Open_AI
+llm = ChatOpenAI(model_name="gpt-3.5-turbo")
+
 # 初始化OpenAI API
 try:
     with open(api_key_file_path, "r") as key_file:
@@ -55,6 +61,7 @@ try:
 except FileNotFoundError:
     api_key = input("请输入您的OpenAI API密钥：")
 openai.api_key = api_key
+
 
 # 初始化变量
 REQUEST_DELAY_SECONDS = 2
