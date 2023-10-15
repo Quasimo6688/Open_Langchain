@@ -1,51 +1,9 @@
 import gradio as gr
 import matplotlib.pyplot as plt
-from PIL import Image  # 图片加载方法
-import random
-import time
-
-class GlobalState:
-    def __init__(self):
-        self.text_input = ""
-        self.llm_function = None
-        self.agent_output_str = ""
-        self.log_output_str = ""
-        self.bot_message = ""
-        self.chat_history = []
-        self.finish_answer = ""
-        self.log_output_str = ""
-        self.streaming_active = False
-
-global_state = None
-
-def chat_function(message, chat_history, temperature):
-    global global_state
-    global_state.text_input = message  # 更新状态的值
-    global_state.bot_message = None
-    #模拟流式输出逻辑
-    for bot_message, log_output in llm_to_UI():
-        if global_state.chat_history and global_state.chat_history[-1][0] == global_state.text_input:
-            user_message, prev_bot_message = global_state.chat_history[-1]
-            global_state.chat_history[-1] = (user_message, prev_bot_message + bot_message)
-        else:
-            global_state.chat_history.append((message, bot_message))
-
-    global_state.agent_output_str = "这是代理的输出"
-
-    plt.figure(figsize=(4, 4))
-    plt.text(0.5, 0.5, '示例图像', fontsize=12, ha='center')
-    plt.axis('off')
-
-    # 为提问创建一个图形
-    plt.figure(figsize=(4, 4))
-    question_img = Image.open("Question_image.png")
-    plt.imshow(question_img)
-    plt.axis('off')
-    plt.savefig("question_image.png")
-
-    return "", global_state.chat_history, global_state.agent_output_str, global_state.log_output_str, ("question_image.png")
-
-
+from PIL import Image
+from model_manager import get_response_from_model
+from state_manager import get_state, update_state
+from langchain.schema import HumanMessage, SystemMessage, AIMessage
 #界面视觉设定：
 theme = gr.themes.Glass().set(
     body_background_fill='*primary_300',
@@ -114,16 +72,42 @@ with gr.Blocks(theme=theme) as ui:
                 agent_output_box = gr.Textbox(label="代理反应", lines=16)
 
 
-            # 绑定事件处理函数到按钮
-            send.click(chat_function, inputs=[msg, chatbot, temperature_UI], outputs=[msg, chatbot, agent_output_box, log_output_box, example_image])
+    def chat_function(message, chat_history, temperature, template):
+        global_state = get_state()
+        global_state.text_input = message  # 更新状态的值
+        global_state.bot_message = None
+        system_msg = [HumanMessage(content=global_state.text_input)]
+        gpt_response = get_response_from_model(global_state.llm_function, system_msg)  # 使用传递的 chat 实例
+        global_state.finish_answer = gpt_response.content
+        global_state.module_template = template
+
+        global_state.agent_output_str += f"这是代理的输出: {global_state.finish_answer}\n"
+        global_state.log_output_str += f"用户提问: {message}, 系统最终回答: {gpt_response.content}\n"
+
+        # 更新chat_history
+        chat_history.append((message, global_state.finish_answer))
+
+        plt.figure(figsize=(4, 4))
+        plt.text(0.5, 0.5, '示例图像', fontsize=12, ha='center')
+        plt.axis('off')
+
+        # 为提问创建一个图形
+        plt.figure(figsize=(4, 4))
+        question_img = Image.open("Question_image.png")
+        plt.imshow(question_img)
+        plt.axis('off')
+        plt.savefig("question_image.png")
+
+        return "", chat_history, global_state.agent_output_str, global_state.log_output_str, (
+            "question_image.png")
+
+    # 绑定事件处理函数到按钮
+    send.click(chat_function, inputs=[msg, chatbot, temperature_UI, template],outputs=[msg, chatbot, agent_output_box, log_output_box, example_image])
+
 
     # 绑定函数到文本框和聊天机器人组件
-    msg.submit(chat_function, [msg, chatbot, temperature_UI], [msg, chatbot, agent_output_box, log_output_box, example_image])
+    msg.submit(chat_function, [msg, chatbot, temperature_UI, template], [msg, chatbot, agent_output_box, log_output_box, example_image])
 
-
-
-
-# 启动界面
 def start_UI(func, state_instance):
     global global_state
     global_state = state_instance
