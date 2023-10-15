@@ -74,15 +74,16 @@ with gr.Blocks(theme=theme) as ui:
 
     def chat_function(message, chat_history, temperature, template):
         global_state = get_state()
+        global_state.module_template = template
         global_state.text_input = message  # 更新状态的值
         global_state.bot_message = None
-        system_msg = [HumanMessage(content=global_state.text_input)]
+        system_msg = [SystemMessage(content=global_state.module_template), HumanMessage(content=global_state.text_input)]
         gpt_response = get_response_from_model(global_state.llm_function, system_msg)  # 使用传递的 chat 实例
         global_state.finish_answer = gpt_response.content
-        global_state.module_template = template
+
 
         global_state.agent_output_str += f"这是代理的输出: {global_state.finish_answer}\n"
-        global_state.log_output_str += f"用户提问: {message}, 系统最终回答: {gpt_response.content}\n"
+        global_state.log_output_str += f"用户提问:{message},用户提示模板内容:{global_state.module_template},系统最终回答:{gpt_response.content}\n"
 
         # 更新chat_history
         chat_history.append((message, global_state.finish_answer))

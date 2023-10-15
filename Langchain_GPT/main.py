@@ -21,7 +21,7 @@ try:
         api_key = key_file.read().strip()
 except FileNotFoundError:
     api_key = input("请输入您的OpenAI API密钥：")
-
+#传递key到模型模块
 chat = initialize_model(api_key)
 
 # 启动Gradio界面
