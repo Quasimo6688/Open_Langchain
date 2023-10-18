@@ -1,5 +1,6 @@
 import gradio as gr
 import matplotlib.pyplot as plt
+import threading
 from PIL import Image
 from model_manager import get_response_from_model
 from state_manager import get_state, update_state
@@ -71,7 +72,7 @@ with gr.Blocks(theme=theme) as ui:
             with gr.Tab("代理反应"):
                 agent_output_box = gr.Textbox(label="代理反应", lines=16)
 
-
+#变量声明
     def chat_function(message, chat_history, temperature, template):
         global_state = get_state()
         global_state.module_template = template
@@ -88,8 +89,9 @@ with gr.Blocks(theme=theme) as ui:
         # 更新chat_history
         chat_history.append((message, global_state.finish_answer))
 
+
         plt.figure(figsize=(4, 4))
-        plt.text(0.5, 0.5, '示例图像', fontsize=12, ha='center')
+        plt.text(0.4, 0.4, '示例图像', fontsize=12, ha='center')
         plt.axis('off')
 
         # 为提问创建一个图形
