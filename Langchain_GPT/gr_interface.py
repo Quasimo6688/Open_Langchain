@@ -1,10 +1,13 @@
 import gradio as gr
 import matplotlib.pyplot as plt
-import threading
 from PIL import Image
+import time
+import queue
+import threading
 from model_manager import get_response_from_model
 from state_manager import get_state, update_state
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
+
 #界面视觉设定：
 theme = gr.themes.Glass().set(
     body_background_fill='*primary_300',
@@ -22,7 +25,7 @@ theme = gr.themes.Glass().set(
 with gr.Blocks(theme=theme) as ui:
     with gr.Row():
         with gr.Column():
-            chatbot = gr.Chatbot(label="聊天机器人", bubble_full_width=False, container=True, height=400) #avatar_images 元组[str |路径 |无，str |路径 |无] |没有默认值：无;用户和机器人的两个头像图像路径或 URL 的元组（按此顺序）。传递“无”，以
+            chatbot = gr.Chatbot(label="聊天机器人", bubble_full_width=False, container=True, height=400, layout="panel") #avatar_images 元组[str |路径 |无，str |路径 |无] |没有默认值：无;用户和机器人的两个头像图像路径或 URL 的元组（按此顺序）。传递“无”，以
             msg = gr.Textbox(label="输入消息", placeholder="您好，我是一个专业数据库问答助手，请在这里输入问题……", lines=3)
             with gr.Row():
                 with gr.Column():
@@ -72,47 +75,40 @@ with gr.Blocks(theme=theme) as ui:
             with gr.Tab("代理反应"):
                 agent_output_box = gr.Textbox(label="代理反应", lines=16)
 
-#变量声明
+
     def chat_function(message, chat_history, temperature, template):
         global_state = get_state()
         global_state.module_template = template
         global_state.text_input = message  # 更新状态的值
         global_state.bot_message = None
         system_msg = [SystemMessage(content=global_state.module_template), HumanMessage(content=global_state.text_input)]
-        gpt_response = get_response_from_model(global_state.llm_function, system_msg)  # 使用传递的 chat 实例
-        global_state.finish_answer = gpt_response.content
+        #gpt_response = get_response_from_model(global_state.llm_function, system_msg)  # 使用传递的 chat 实例
+        #global_state.finish_answer = gpt_response.content
+        # 使用生成器获取模型的流式输出
+        chat_history.append((message, ""))
+        for token in get_response_from_model(global_state.llm_function, system_msg):
+            time.sleep(0.1)
+            chat_history[-1] = (message, chat_history[-1][1] + token)
+            yield "", chat_history
 
-
-        global_state.agent_output_str += f"这是代理的输出: {global_state.finish_answer}\n"
-        global_state.log_output_str += f"用户提问:{message},用户提示模板内容:{global_state.module_template},系统最终回答:{gpt_response.content}\n"
+        #global_state.agent_output_str += f"这是代理的输出: {global_state.finish_answer}\n"
+        #global_state.log_output_str += f"用户提问:{message},用户提示模板内容:{global_state.module_template},系统最终回答:{gpt_response.content}\n"
 
         # 更新chat_history
-        chat_history.append((message, global_state.finish_answer))
+        #chat_history.append((message, global_state.finish_answer))
 
 
-        plt.figure(figsize=(4, 4))
-        plt.text(0.4, 0.4, '示例图像', fontsize=12, ha='center')
-        plt.axis('off')
-
-        # 为提问创建一个图形
-        plt.figure(figsize=(4, 4))
-        question_img = Image.open("Question_image.png")
-        plt.imshow(question_img)
-        plt.axis('off')
-        plt.savefig("question_image.png")
-
-        return "", chat_history, global_state.agent_output_str, global_state.log_output_str, (
-            "question_image.png")
-
-    # 绑定事件处理函数到按钮
-    send.click(chat_function, inputs=[msg, chatbot, temperature_UI, template],outputs=[msg, chatbot, agent_output_box, log_output_box, example_image])
+        return "", chat_history   #, global_state.agent_output_str, global_state.log_output_str, (
 
 
-    # 绑定函数到文本框和聊天机器人组件
-    msg.submit(chat_function, [msg, chatbot, temperature_UI, template], [msg, chatbot, agent_output_box, log_output_box, example_image])
+    # 绑定事件处理函数到按钮，按发送按钮触发输出
+    send.click(chat_function, inputs=[msg, chatbot, temperature_UI, template], outputs=[msg, chatbot])   #, agent_output_box, log_output_box, example_image])
+    # 绑定函数到文本框和聊天机器人组件,按回车触发输出
+    msg.submit(chat_function, [msg, chatbot, temperature_UI, template], [msg, chatbot])   #, agent_output_box, log_output_box, example_image])
 
 def start_UI(func, state_instance):
     global global_state
     global_state = state_instance
     global_state.llm_function = func
-    ui.launch(share=True, inbrowser=True)
+    #threading.Thread(target=check_model_output, args=(global_streaming_buffer,)).start()
+    ui.queue().launch(share=True, inbrowser=True)

@@ -10,10 +10,11 @@ from model_manager import initialize_model
 from gr_interface import start_UI
 from state_manager import get_state, update_state
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 # 相对位置加载配置文件
 script_dir = os.path.dirname(os.path.abspath(__file__))
 api_key_file_path = os.path.join(script_dir, 'key.txt')
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # 自动填写OpenAI API
 try:
@@ -26,3 +27,5 @@ chat = initialize_model(api_key)
 
 # 启动Gradio界面
 start_UI(chat, get_state())
+
+

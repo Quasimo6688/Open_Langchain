@@ -1,3 +1,5 @@
+import threading
+import queue
 class GlobalState:
     def __init__(self):
         self.text_input = ""
@@ -7,9 +9,10 @@ class GlobalState:
         self.bot_message = ""
         self.chat_history = []
         self.finish_answer = ""
-        self.log_output_str = ""
         self.streaming_active = False
         self.module_template = ""
+        self.streaming_buffer = queue.Queue()
+        self.buffer_lock = threading.Lock()
 global_state = GlobalState()
 
 def get_state():
