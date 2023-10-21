@@ -1,4 +1,5 @@
 import openai
+import time
 import queue
 import logging
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
@@ -48,4 +49,5 @@ def get_response_from_model(chat_instance, system_msg):
         token = streaming_buffer.get()
         if token is None:  # 检查结束信号
             break
+        time.sleep(0.05)
         yield token

@@ -2,11 +2,25 @@ import gradio as gr
 import matplotlib.pyplot as plt
 from PIL import Image
 import time
+import logging
 import queue
 import threading
 from model_manager import get_response_from_model
 from state_manager import get_state, update_state
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
+#接口函数：
+streaming_active = True
+MMsg = None
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def interface_streaming_output(system_msg):
+    global streaming_active
+    for token in get_response_from_model(global_state.llm_function, system_msg):
+        #time.sleep(0.1)  # 根据需要调整
+        MMsg=token
+        logging.info(f"MMsg value: {MMsg}")  # 添加日志记录MMsg的值
+        time.sleep(0.1)
+        yield MMsg
+    streaming_active = False  # 在模拟结束后关闭开关
 
 #界面视觉设定：
 theme = gr.themes.Glass().set(
@@ -77,20 +91,22 @@ with gr.Blocks(theme=theme) as ui:
 
 
     def chat_function(message, chat_history, temperature, template):
+        global streaming_active
+        streaming_active = True  # 重置状态开关
         global_state = get_state()
         global_state.module_template = template
         global_state.text_input = message  # 更新状态的值
-        global_state.bot_message = None
+        #global_state.bot_message = None
         system_msg = [SystemMessage(content=global_state.module_template), HumanMessage(content=global_state.text_input)]
-        #gpt_response = get_response_from_model(global_state.llm_function, system_msg)  # 使用传递的 chat 实例
-        #global_state.finish_answer = gpt_response.content
-        # 使用生成器获取模型的流式输出
-        chat_history.append((message, ""))
-        for token in get_response_from_model(global_state.llm_function, system_msg):
-            time.sleep(0.1)
-            chat_history[-1] = (message, chat_history[-1][1] + token)
-            yield "", chat_history
 
+        chat_history.append((message, ""))
+        for MMsg in interface_streaming_output(system_msg):  # 调用接口函数
+            if not streaming_active:  # 检查开关状态
+                break
+            chat_history[-1] = (message, chat_history[-1][1] + MMsg)  # 更新消息
+
+            yield "", chat_history
+        return "", chat_history  # , global_state.agent_output_str, global_state.log_output_str, (
         #global_state.agent_output_str += f"这是代理的输出: {global_state.finish_answer}\n"
         #global_state.log_output_str += f"用户提问:{message},用户提示模板内容:{global_state.module_template},系统最终回答:{gpt_response.content}\n"
 
@@ -98,13 +114,13 @@ with gr.Blocks(theme=theme) as ui:
         #chat_history.append((message, global_state.finish_answer))
 
 
-        return "", chat_history   #, global_state.agent_output_str, global_state.log_output_str, (
+
 
 
     # 绑定事件处理函数到按钮，按发送按钮触发输出
     send.click(chat_function, inputs=[msg, chatbot, temperature_UI, template], outputs=[msg, chatbot])   #, agent_output_box, log_output_box, example_image])
     # 绑定函数到文本框和聊天机器人组件,按回车触发输出
-    msg.submit(chat_function, [msg, chatbot, temperature_UI, template], [msg, chatbot])   #, agent_output_box, log_output_box, example_image])
+    msg.submit(chat_function, inputs=[msg, chatbot, temperature_UI, template], outputs=[msg, chatbot])  #, agent_output_box, log_output_box, example_image])
 
 def start_UI(func, state_instance):
     global global_state
