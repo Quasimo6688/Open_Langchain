@@ -4,7 +4,6 @@ import queue
 import logging
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chat_models import ChatOpenAI
-from state_manager import get_state
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
@@ -26,10 +25,6 @@ class CustomStreamingCallback(StreamingStdOutCallbackHandler):
         self.full_response = ""  # 重置完整响应字符串
 
 
-
-
-
-
 def initialize_model(api_key, model_name="gpt-3.5-turbo", temperature=0.5, streaming=True):
     streaming_buffer = queue.Queue()
     callbacks = [CustomStreamingCallback(streaming_buffer)]
@@ -37,9 +32,8 @@ def initialize_model(api_key, model_name="gpt-3.5-turbo", temperature=0.5, strea
                       callbacks=callbacks)
 
 def get_response_from_model(chat_instance, system_msg):
-    global_state = get_state()
     # 创建一个队列来存放模型的流式输出
-    streaming_buffer = global_state.streaming_buffer
+    streaming_buffer = queue.Queue()
     # 使用自定义的回调处理器
     callbacks = [CustomStreamingCallback(streaming_buffer)]
     # 传递回调处理器到模型中
@@ -48,10 +42,8 @@ def get_response_from_model(chat_instance, system_msg):
     chat_instance(messages=system_msg)
     # 使用循环从队列中获取模型的流式输出
     while True:
-        with global_state.buffer_lock:
-            if not streaming_buffer.empty():
-                token = streaming_buffer.get()
-                if token is None:  # 检查结束信号
-                    break
-                yield token
-        time.sleep(0.1)
+        token = streaming_buffer.get()
+        if token is None:  # 检查结束信号
+            break
+        time.sleep(0.05)
+        yield token

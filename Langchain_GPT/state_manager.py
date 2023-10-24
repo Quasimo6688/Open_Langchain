@@ -1,5 +1,7 @@
 import threading
 import queue
+
+
 class GlobalState:
     def __init__(self):
         self.text_input = ""
@@ -14,11 +16,15 @@ class GlobalState:
         self.streaming_buffer = queue.Queue()
         self.buffer_lock = threading.Lock()
         self.reset_flag = False
+
+
 global_state = GlobalState()
+
 
 def get_state():
     global_state.thread_stop_event = threading.Event()
     return global_state
+
 
 def update_state(attr, value):
     setattr(global_state, attr, value)

@@ -23,9 +23,9 @@ try:
 except FileNotFoundError:
     api_key = input("请输入您的OpenAI API密钥：")
 #传递key到模型模块
-chat = initialize_model(api_key)
+model_info = initialize_model(api_key)
 
 # 启动Gradio界面
-start_UI(chat, get_state())
+start_UI(model_info, get_state())
 
 
