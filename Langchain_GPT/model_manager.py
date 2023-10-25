@@ -1,16 +1,33 @@
 import openai
 import time
 import queue
-import logging
+import logging #加载日志功能
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chat_models import ChatOpenAI
 import threading
 from state_manager import shared_output
+from langchain.memory import ConversationSummaryMemory #会话总结记忆体
+from langchain.chains import ConversationalRetrievalChain#会话检索链
+from langchain.text_splitter import RecursiveCharacterTextSplitter#文档分割器
+from langchain.embeddings import OpenAIEmbeddings #OpenAI文本嵌入器
+from langchain.vectorstores import Chroma #向量存储器
+
+#文档分割器参数
+#text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0)
+#all_splits = text_splitter.split_documents(data)
+#向量存储设置
+#vectorstore = Chroma.from_documents(documents=all_splits, embedding=OpenAIEmbeddings())
+#链参数和格式化设置
+#llm = ChatOpenAI()
+#memory = ConversationSummaryMemory(llm=llm,memory_key="chat_history",return_messages=True)#记忆体参数
+#retriever = vectorstore.as_retriever()
+#qa = ConversationalRetrievalChain.from_llm(llm, retriever=retriever, memory=memory)#会话链参数设置
+#qa("")#括号中传入提问字符串启动对话
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
 
-class CustomStreamingCallback(StreamingStdOutCallbackHandler):
+class CustomStreamingCallback(StreamingStdOutCallbackHandler):#流式输出回调类
     def __init__(self, queue):
         super().__init__()
         self.queue = queue
@@ -24,7 +41,7 @@ class CustomStreamingCallback(StreamingStdOutCallbackHandler):
     def on_llm_end(self, response, **kwargs):
         self.queue.put(None)  # 当输出结束时，将 None 放入队列
         logger.info(f"模型输出完成: {self.full_response}")  # 记录整个响应
-        self.full_response = ""  # 重置完整响应字符串
+        self.full_response = ""  # 重置完整响应字符串##
 
 
 def initialize_model(api_key, model_name="gpt-3.5-turbo", temperature=0.5, streaming=True):
