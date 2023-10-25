@@ -5,22 +5,17 @@ import time
 import logging
 import queue
 import threading
+
+import model_manager
+import state_manager
 from model_manager import get_response_from_model
-from state_manager import get_state, update_state
+from state_manager import get_state, update_state, shared_output
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
+
 #接口函数：
-streaming_active = True
-MMsg = None
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-def interface_streaming_output(system_msg):
-    global streaming_active
-    for token in get_response_from_model(global_state.llm_function, system_msg):
-        #time.sleep(0.1)  # 根据需要调整
-        MMsg=token
-        logging.info(f"MMsg value: {MMsg}")  # 添加日志记录MMsg的值
-        time.sleep(0.1)
-        yield MMsg
-    streaming_active = False  # 在模拟结束后关闭开关
+
 
 #界面视觉设定：
 theme = gr.themes.Glass().set(
@@ -90,27 +85,38 @@ with gr.Blocks(theme=theme) as ui:
                 agent_output_box = gr.Textbox(label="代理反应", lines=16)
 
 
+
+    def threaded_model_call(llm_function, system_msg):
+        model_manager.get_response_from_model(llm_function, system_msg)# 调用模型的函数
+        time.sleep(2)
+        with global_state.buffer_lock:  # 使用锁确保线程安全
+            while not shared_output.empty():
+                logging.info("清空转录队列")
+                shared_output.get()
+                logging.info("流程结束")
+
+
     def chat_function(message, chat_history, temperature, template):
-        global streaming_active
-        streaming_active = True  # 重置状态开关
         global_state = get_state()
         global_state.module_template = template
         global_state.text_input = message  # 更新状态的值
-        #global_state.bot_message = None
+
         system_msg = [SystemMessage(content=global_state.module_template), HumanMessage(content=global_state.text_input)]
 
         chat_history.append((message, ""))
         yield "", chat_history
 
-        for token in get_response_from_model(global_state.llm_function, system_msg):  # 调用模型的函数
-            MMsg = token
-            logging.info(f"本地队列接收: {MMsg}")  # 添加日志记录MMsg的值
-            time.sleep(0.1)
-            chat_history[-1] = (message, chat_history[-1][1] + MMsg)  # 更新消息
+        thread = threading.Thread(target=threaded_model_call, args=(global_state.llm_function, system_msg))
+        thread.start()
 
+        while True:
+            token = state_manager.shared_output.get()
+            if token is None:  # 检查结束信号
+                logging.info("chat监测到结束信号")
+                break
+            logging.info(f"读取队列并界面刷新: {token}")
+            chat_history[-1] = (message, chat_history[-1][1] + token)  # 更新消息
             yield "", chat_history
-
-        streaming_active = False  # 在模拟结束后关闭开关
 
         return "", chat_history  # , global_state.agent_output_str, global_state.log_output_str, (
         #global_state.agent_output_str += f"这是代理的输出: {global_state.finish_answer}\n"
