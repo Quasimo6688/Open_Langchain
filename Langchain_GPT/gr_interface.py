@@ -88,12 +88,7 @@ with gr.Blocks(theme=theme) as ui:
 
     def threaded_model_call(llm_function, system_msg):
         model_manager.get_response_from_model(llm_function, system_msg)# 调用模型的函数
-        time.sleep(2)
-        with global_state.buffer_lock:  # 使用锁确保线程安全
-            while not shared_output.empty():
-                logging.info("清空转录队列")
-                shared_output.get()
-                logging.info("流程结束")
+
 
 
     def chat_function(message, chat_history, temperature, template):
@@ -118,6 +113,9 @@ with gr.Blocks(theme=theme) as ui:
             chat_history[-1] = (message, chat_history[-1][1] + token)  # 更新消息
             yield "", chat_history
 
+        clear_queue(shared_output)
+
+        logging.info("流程结束，清空队列")
         return "", chat_history  # , global_state.agent_output_str, global_state.log_output_str, (
         #global_state.agent_output_str += f"这是代理的输出: {global_state.finish_answer}\n"
         #global_state.log_output_str += f"用户提问:{message},用户提示模板内容:{global_state.module_template},系统最终回答:{gpt_response.content}\n"
@@ -126,7 +124,12 @@ with gr.Blocks(theme=theme) as ui:
         #chat_history.append((message, global_state.finish_answer))
 
 
-
+    def clear_queue(q):
+        try:
+            while True:
+                q.get_nowait()
+        except queue.Empty:
+            pass
 
 
     # 绑定事件处理函数到按钮，按发送按钮触发输出
