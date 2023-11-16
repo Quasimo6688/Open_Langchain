@@ -13,6 +13,6 @@ def search(query):
     return output_summaries
 # 主程序
 if __name__ == "__main__":
-    input_query = "铁原战役"  # 这里模拟从主程序或代理接收到的查询
+    input_query = "福特野马电动版跑车"  # 这里模拟从主程序或代理接收到的查询
     search(input_query)
     print("搜索结果摘要：", output_summaries)

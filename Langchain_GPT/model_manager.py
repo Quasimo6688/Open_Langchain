@@ -6,23 +6,7 @@ from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chat_models import ChatOpenAI
 import threading
 from state_manager import shared_output
-from langchain.memory import ConversationSummaryMemory #会话总结记忆体
-from langchain.chains import ConversationalRetrievalChain#会话检索链
-from langchain.text_splitter import RecursiveCharacterTextSplitter#文档分割器
-from langchain.embeddings import OpenAIEmbeddings #OpenAI文本嵌入器
-from langchain.vectorstores import Chroma #向量存储器
 
-#文档分割器参数
-#text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0)
-#all_splits = text_splitter.split_documents(data)
-#向量存储设置
-#vectorstore = Chroma.from_documents(documents=all_splits, embedding=OpenAIEmbeddings())
-#链参数和格式化设置
-#llm = ChatOpenAI()
-#memory = ConversationSummaryMemory(llm=llm,memory_key="chat_history",return_messages=True)#记忆体参数
-#retriever = vectorstore.as_retriever()
-#qa = ConversationalRetrievalChain.from_llm(llm, retriever=retriever, memory=memory)#会话链参数设置
-#qa("")#括号中传入提问字符串启动对话
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
@@ -51,6 +35,8 @@ def initialize_model(api_key, model_name="gpt-3.5-turbo", temperature=0.5, strea
     return ChatOpenAI(model_name=model_name, temperature=temperature, openai_api_key=api_key, streaming=streaming,
                       callbacks=callbacks)
 
+
+
 def process_streaming_output(streaming_buffer):
     """
     在独立线程中处理流式输出的函数
@@ -70,7 +56,6 @@ def get_response_from_model(chat_instance, system_msg):
     streaming_buffer = queue.Queue()
     thread = threading.Thread(target=process_streaming_output, args=(streaming_buffer,))
     thread.start()
-
     # 使用自定义的回调处理器
     callbacks = [CustomStreamingCallback(streaming_buffer)]
     # 传递回调处理器到模型中
