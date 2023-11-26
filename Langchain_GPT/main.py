@@ -9,14 +9,13 @@ from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from model_manager import initialize_model
 from gr_interface import start_UI
 from state_manager import get_state, update_state
-from glm_model import initialize_model_GLM
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # 相对位置加载配置文件
 script_dir = os.path.dirname(os.path.abspath(__file__))
 api_key_file_path = os.path.join(script_dir, 'key.txt')
-glm_key_file_path = os.path.join(script_dir, 'glm_key.TXT')
+glm_key_file_path = os.path.join(script_dir, 'glm_key.txt')
 
 # 自动填写OpenAI API
 try:
@@ -39,6 +38,6 @@ model_info = initialize_model(api_key)  # 初始化OpenAI模型
 
 
 # 启动Gradio界面
-start_UI(model_info, glm_model_key, get_state())
+start_UI(model_info, glm_api_key, get_state())
 
 

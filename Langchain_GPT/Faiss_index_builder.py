@@ -23,7 +23,7 @@ logging.info("向量文件加载完成，开始创建索引")
 # 将所有向量合并成一个大的 NumPy 数组
 all_vectors = np.concatenate(vectors, axis=0)
 
-dimension = all_vectors.shape[1]  # 向量的维度
+dimension = all_vectors.shape[1]
 index = faiss.IndexFlatL2(dimension)  # 使用 L2 距离
 
 # 一次性添加所有向量到索引

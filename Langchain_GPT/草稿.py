@@ -17,63 +17,42 @@ zhipuai.api_key = "1a21c86a3aa8f435250194b3dc9dc6b8.2Aov2pnPfNB7lLPi"
 #全局变量定义：
     # 获取当前脚本的绝对路径的目录部分
 script_dir = os.path.dirname(os.path.abspath(__file__))
-    # 定义嵌入向量文件和文本文件的路径
-embeddings_paths = [
-    os.path.join(script_dir, 'Embedding_Files', '航空知识手册全集A.pdf_vectors.npy'),
-    os.path.join(script_dir, 'Embedding_Files', '航空知识手册全集B.pdf_vectors.npy'),
-    os.path.join(script_dir, 'Embedding_Files', '运动驾驶员执照理论 考试知识点(试行) 缩水.pdf_vectors.npy')
-    ]
-text_files = [
-    os.path.join(script_dir, 'Embedding_Files', '航空知识手册全集A.pdf_collection.json'),
-    os.path.join(script_dir, 'Embedding_Files', '航空知识手册全集B.pdf_collection.json'),
-    os.path.join(script_dir, 'Embedding_Files', '运动驾驶员执照理论 考试知识点(试行) 缩水.pdf_collection.json')
-    ]
-# 定义合并后的文本文件路径
-combined_text_path = os.path.join(script_dir, 'Embedding_Files', 'combined_text_file.txt')
-# faiss索引文件路径
-faiss_index_path = os.path.join(script_dir, 'Embedding_Files', 'faiss_glm.index')
+embedding_files_dir = os.path.join(script_dir, 'Embedding_Files')
+
+# 初始化变量
+embedding_path = ""
+combined_text_path = ""
+faiss_index_path = ""
+
+# 遍历目标文件夹，根据文件后缀进行分类
+for filename in os.listdir(embedding_files_dir):
+    if filename.endswith('.npy'):
+        embedding_path = os.path.join(embedding_files_dir, filename)
+    elif filename.endswith('.json'):
+        combined_text_path = os.path.join(embedding_files_dir, filename)
+    elif filename.endswith('.index'):
+        faiss_index_path = os.path.join(embedding_files_dir, filename)
+
 
 # 创建响应队列
 response_queue = queue.Queue()
 
 
   #加载向量知识库文件
-def load_embeddings(embeddings_paths):
-    all_embeddings = []
-    for path in embeddings_paths:
-        try:
-            if os.path.exists(path):
-                embeddings = np.load(path)
-                all_embeddings.append(embeddings)
-            else:
-                logging.error(f"嵌入向量文件 {path} 未找到。")
-                return None
-        except Exception as e:
-            logging.error(f"加载嵌入向量文件 {path} 时出错: {e}")
-            return None
-    return np.concatenate(all_embeddings, axis=0)
-
-
-def combine_json_files(file_paths, combined_file_path):
-    combined_data = {}  # 创建一个字典来存储合并后的数据
-    next_index = 0  # 下一个可用的行号
-
-    for file_path in file_paths:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            data = json.load(file)  # 加载 JSON 文件的内容
-            for key, value in data.items():
-                combined_data[str(next_index)] = value  # 使用递增的行号作为键
-                next_index += 1  # 增加下一个行号
-
-    # 将合并后的数据写入合并文件
-    with open(combined_file_path, 'w', encoding='utf-8') as combined_file:
-        json.dump(combined_data, combined_file, ensure_ascii=False, indent=4)
-   #加载索引文件
+def load_embeddings(embedding_path):
+    if os.path.exists(embedding_path):
+        embeddings = np.load(embedding_path)
+        logging.info("嵌入向量文件加载成功。")
+        return embeddings
+    else:
+        logging.error(f"嵌入向量文件 {embedding_path} 未找到。")
+        return None
+  #初始化索引
 def initialize_faiss(faiss_index_path):
     if os.path.exists(faiss_index_path):
-        # 使用 faiss 库直接读取索引
         faiss_index = faiss.read_index(faiss_index_path)
         logging.info("FAISS索引加载成功。")
+        return faiss_index
     else:
         logging.error("FAISS索引文件未找到。")
         return None
@@ -101,10 +80,11 @@ def get_query_vector(message):
         # 如果响应不成功，仅返回 None
         return None
 
-  #数据库比对返回内容
-def search_in_faiss_index(query_vector, faiss_index, top_k=3):
+  #通过索引向数据库比对返回内容
+def search_in_faiss_index(query_vector, faiss_index, top_k=7):
     # 在FAISS索引中搜索
     scores, indices = faiss_index.search(np.array([query_vector]), top_k)
+    logging.info(f"FAISS搜索得分: {scores}, 索引: {indices}")
     return scores, indices
 
 def get_combined_text(indices, combined_text_path):
@@ -113,7 +93,8 @@ def get_combined_text(indices, combined_text_path):
         data = json.load(file)
 
     # 根据索引获取相应的文本块
-    text_blocks = [data[str(index)] for index in indices[0]]  # 假设每个索引对应一个文本块
+    text_blocks = [data[str(index)] for index in indices[0]]  # 正常状态下每个索引对应一个文本块
+    logging.info(f"通过索引找到的文本块: {text_blocks}")
 
     # 拼接文本块
     combined_result = "\n".join(text_blocks)
@@ -123,7 +104,7 @@ def get_combined_text(indices, combined_text_path):
 def generate_response(prompt):
     output_queue = queue.Queue()
     def process_streaming_output():
-        # 使用zhipuai聊天模型生成回答，这里省略了具体的调用细节
+        # 使用zhipuai聊天模型生成回答，开启新线程并进行流式输出
         response = zhipuai.model_api.sse_invoke(
             model="chatglm_turbo",
             prompt=prompt,
@@ -134,11 +115,12 @@ def generate_response(prompt):
         try:
             for event in response.events():
                 if event.event == "add":
+                    #这里向函数内的队列写入输出内容
                     output_queue.put(event.data)
                 elif event.event in ["error", "interrupted", "finish"]:
                     break
         finally:
-            output_queue.put(None)  # 发送结束信号
+            output_queue.put(None)  # 向队列发送结束信号
 
     # 启动处理线程
     threading.Thread(target=process_streaming_output).start()
@@ -146,7 +128,7 @@ def generate_response(prompt):
     return output_queue
 
 
-def Gr_UI(message, history):
+def Gr_UI(message):
 
     # 获取查询的向量转化结果
     query_vector = get_query_vector(message)
@@ -180,7 +162,7 @@ def Gr_UI(message, history):
             logging.info("接收到终止信号，输出完成。")
             break  # 接收到结束信号，退出循环
         finish_answer = (f"{finish_answer + response}")
-        time.sleep(0.2)
+        time.sleep(0.1)
         yield finish_answer
 
     # 清空队列（确保这个函数已经定义）
@@ -189,11 +171,10 @@ def Gr_UI(message, history):
 
 
 #函数调用：
-embeddings = load_embeddings(embeddings_paths)
+embeddings = load_embeddings(embedding_path)
     # 初始化FAISS索引
 faiss_index = initialize_faiss(faiss_index_path)
-    # 执行合并文本文件
-combine_json_files(text_files, combined_text_path)
+
     # 启动用户界面
-Start_UI = gr.ChatInterface(Gr_UI).queue()
-Start_UI.launch(share=True, inbrowser=True)
+#Start_UI = gr.ChatInterface(Gr_UI).queue()
+#Start_UI.launch(share=True, inbrowser=True)

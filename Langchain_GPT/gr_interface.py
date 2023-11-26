@@ -5,26 +5,29 @@ import time
 import logging
 import queue
 import threading
+import os
 
+import glm_model
 import model_manager
 import state_manager
 from model_manager import get_response_from_model
 from state_manager import get_state, update_state, shared_output
-from glm_model import get_response_from_model_GLM
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
 
 
 
-
+output_queue = queue.Queue()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+#定义数据库文件夹位置
+script_dir = os.path.dirname(os.path.abspath(__file__))
+embedding_files_dir = os.path.join(script_dir, 'Embedding_Files')
 
 #界面视觉设定：
 theme = gr.themes.Glass().set(
     body_background_fill='*primary_300',
     block_background_fill='*primary_100',
     block_border_width='3px',
-    chatbot_code_background_color='*primary_100',
     button_large_padding='*spacing_xs',
     button_large_radius='*radius_md',
     button_large_text_weight='500',
@@ -83,7 +86,8 @@ with gr.Blocks(theme=theme) as ui:
 
         with gr.Column():
             example_image = gr.Image(label="示例图像")
-            file_upload = gr.File(label="上传文件")
+            file_upload = gr.File(label="上传文件", file_count="multiple")
+            FileExplorer = gr.FileExplorer(label="知识库文件管理器", root=embedding_files_dir)
             gr.Markdown("日志调试台.")
             with gr.Tab("Langchain日志"):
                 log_output_box = gr.Textbox(label="Langchain日志", lines=16)
@@ -98,7 +102,7 @@ with gr.Blocks(theme=theme) as ui:
 
 
     def threaded_model_call_GLM(glm_key, message):
-        glm_model.get_response_from_model_GLM(glm_key, message)
+        glm_model.GLM_Streaming_response(message)
 
 
 
@@ -117,7 +121,7 @@ with gr.Blocks(theme=theme) as ui:
             thread = threading.Thread(target=model_manager.get_response_from_model,
                                       args=(global_state.openai_model_info, system_msg))
         elif model_choice == 'Chat-GLM':
-            thread = threading.Thread(target=glm_model.get_response_from_model_GLM, args=(system_msg,))
+            thread = threading.Thread(target=glm_model.GLM_Streaming_response, args=(message,))
         else:
             raise ValueError("未知模型选择")
 
