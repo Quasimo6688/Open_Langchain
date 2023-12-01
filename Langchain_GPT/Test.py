@@ -6,7 +6,7 @@ import logging  # 用于日志功能
 import configparser  # 用于读取配置文件
 import nltk
 import getpass
-
+#6688888
 from nltk.corpus import wordnet
 from transformers import GPT2Tokenizer
 # Langchain 相关导入

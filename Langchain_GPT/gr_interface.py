@@ -7,6 +7,7 @@ import queue
 import threading
 import os
 
+import GLM_Agent
 import glm_model
 import model_manager
 import state_manager
@@ -39,7 +40,8 @@ theme = gr.themes.Glass().set(
 with gr.Blocks(theme=theme) as ui:
     with gr.Row():
         with gr.Column():
-            chatbot = gr.Chatbot(label="聊天机器人", bubble_full_width=False, container=True, height=400, layout="panel") #avatar_images 元组[str |路径 |无，str |路径 |无] |没有默认值：无;用户和机器人的两个头像图像路径或 URL 的元组（按此顺序）。传递“无”，以
+            chatbot = gr.Chatbot(label="聊天机器人", bubble_full_width=False, container=True, height=400, layout="panel",
+                                 likeable=True, avatar_images=("Chat_P.png", "AI_P.png")) #avatar_images 元组[str |路径 |无，str |路径 |无] |没有默认值：无;用户和机器人的两个头像图像路径或 URL 的元组（按此顺序）。传递“无”，以
             msg = gr.Textbox(label="输入消息", placeholder="您好，我是一个专业数据库问答助手，请在这里输入问题……", lines=3)
             with gr.Row():
                 with gr.Column():
@@ -132,9 +134,10 @@ with gr.Blocks(theme=theme) as ui:
             if token is None:  # 检查结束信号
                 logging.info("chat监测到结束信号")
                 break
-            logging.info(f"读取队列并界面刷新: {token}")
+            #logging.info(f"读取队列并界面刷新: {token}")
             chat_history[-1] = (message, chat_history[-1][1] + token)  # 更新消息
             yield "", chat_history
+
 
         clear_queue(shared_output)
 

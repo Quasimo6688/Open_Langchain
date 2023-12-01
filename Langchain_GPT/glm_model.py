@@ -86,12 +86,13 @@ def search_in_faiss_index(query_vector, faiss_index, top_k=7):
     return scores, indices
 
 def get_combined_text(indices, combined_text_path):
-    # 从合并的 JSON 文件中读取内容
+    # 从字典格式的 JSON 文件中读取内容
     with open(combined_text_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
 
-    # 根据索引获取相应的文本块
-    text_blocks = [data[str(index)] for index in indices[0]]  # 正常状态下每个索引对应一个文本块
+    # 根据索引获取相应的文本块，这些文本块现在存储在字典的 'content' 键中
+    text_blocks = [data[str(index)]['content'] for index in indices[0]]  # 每个索引对应一个文本块的 'content' 键
+
     logging.info(f"通过索引找到的文本块: {text_blocks}")
 
     # 拼接文本块
@@ -117,8 +118,13 @@ def generate_response(prompt):
                 if event.event == "add":
                     #这里向函数内的队列写入输出内容
                     shared_output.put(event.data)
-                elif event.event in ["error", "interrupted", "finish"]:
+                elif event.event in ["error", "interrupted"]:
                     break
+                elif event.event == "finish":
+                    print(event.data)
+                    shared_output.put(event.meta)
+                else:
+                    print(event.data)
         finally:
             shared_output.put(None)  # 向队列发送结束信号#
 
@@ -130,8 +136,9 @@ def generate_response(prompt):
 
 def GLM_Streaming_response(message):
     logging.info(f"模型启动程序调用正常")
+
     # 初始化向量和FAISS索引
-    embeddings = load_embeddings(embedding_path)
+    load_embeddings(embedding_path)
     faiss_index = initialize_faiss(faiss_index_path)
 
     # 获取查询的向量转化结果
@@ -157,13 +164,8 @@ def GLM_Streaming_response(message):
              f"找到最合适的解答。如果答案在文档中，则会用文档的原文回答，并指出文档名及页码。若答案不在文档内，你将依据你的专业知识回答，并明确指出。" \
              f"你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与飞行训练和学习需求紧密相关的专业指导。" \
              f"请记住，安全永远是首要考虑，负责任的态度对于飞行至关重要。用户的问题是：{message}"
-    output_queue = generate_response(prompt)
 
-
-        #finish_answer = (f"{finish_answer + response}")
-        #time.sleep(0.1)
-        #yield finish_answer
-
+    generate_response(prompt)
 
 
 
