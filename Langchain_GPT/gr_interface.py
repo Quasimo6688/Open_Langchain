@@ -6,14 +6,15 @@ import logging
 import queue
 import threading
 import os
-
+import numpy as np
 import GLM_Agent
 import glm_model
 import model_manager
 import state_manager
 from model_manager import get_response_from_model
-from state_manager import get_state, update_state, shared_output
+from state_manager import get_state, update_state, shared_output, Images_path
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
+
 
 
 
@@ -87,7 +88,7 @@ with gr.Blocks(theme=theme) as ui:
                     temporary_Upload = gr.Button("保存模板", min_width=88)
 
         with gr.Column():
-            example_image = gr.Image(label="示例图像")
+            example_image = gr.Gallery(label="相关图片", show_download_button=True, columns=[3], rows=[1], height="auto")  #preview=Ture(缩略图模式)
             file_upload = gr.File(label="上传文件", file_count="multiple")
             FileExplorer = gr.FileExplorer(label="知识库文件管理器", root=embedding_files_dir)
             gr.Markdown("日志调试台.")
@@ -147,6 +148,24 @@ with gr.Blocks(theme=theme) as ui:
         #global_state.log_output_str += f"用户提问:{message},用户提示模板内容:{global_state.module_template},系统最终回答:{gpt_response.content}\n"
 
 
+    import time
+
+
+    def Image_show():
+        attempts = 0
+        max_attempts = 30
+
+        while attempts < max_attempts:
+            Images_path = state_manager.Images_path
+
+            if Images_path:  # 检查列表是否非空
+                return Images_path
+            else:
+                time.sleep(1)  # 等待一秒后再次检查
+                attempts += 1
+
+        # 如果尝试了 max_attempts 次仍然为空，则返回空列表或其他指示无结果的值
+        return []
 
 
     def save_uploaded_file(uploaded_file):
@@ -175,8 +194,9 @@ with gr.Blocks(theme=theme) as ui:
         except queue.Empty:
             pass
 
-    #模板默认值
-
+    #绑定图片更新函数到按钮，按发送按钮触发输出
+    send.click(Image_show, None, example_image)
+    msg.submit(Image_show, None, example_image)
     # 绑定事件处理函数到按钮，按发送按钮触发输出
     send.click(chat_function, inputs=[model_selector, msg, chatbot, temperature_UI, template], outputs=[msg, chatbot])   #, agent_output_box, log_output_box, example_image])
     # 绑定函数到文本框和聊天机器人组件,按回车触发输出

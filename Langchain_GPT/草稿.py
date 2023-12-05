@@ -1,345 +1,204 @@
-import os
+import time
 import logging
 import numpy as np
 import faiss
+import os
 import zhipuai
+import gradio as gr
+import queue
 import json
 import threading
-import jieba
-from pdfminer.high_level import extract_text
-from tqdm import tqdm
-import time
-import concurrent.futures
-import pdfplumber
-from tqdm import tqdm
+from state_manager import shared_output
 import re
-import hashlib
-import io
-from io import BytesIO
-from PIL import Image
 
-
-# 初始化日志配置
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
 # 设置zhipuai API密钥
 zhipuai.api_key = "1a21c86a3aa8f435250194b3dc9dc6b8.2Aov2pnPfNB7lLPi"
 
-# 全局变量定义
+
+#全局变量定义：
+    # 获取当前脚本的绝对路径的目录部分
 script_dir = os.path.dirname(os.path.abspath(__file__))
+embedding_files_dir = os.path.join(script_dir, 'Embedding_Files')
 
-def find_pdf_files(folder_path):
-    logger.info(f"开始检查路径")
-    """
-    在指定文件夹中查找所有PDF文件。
-    """
-    pdf_files = []
-    for filename in os.listdir(folder_path):
-        if filename.lower().endswith('.pdf'):
-            pdf_path = os.path.join(folder_path, filename)
-            pdf_files.append(pdf_path)
+# 初始化变量
+embedding_path = ""
+combined_text_path = ""
+faiss_index_path = ""
 
-    logger.info(f"在 {folder_path} 中找到 {len(pdf_files)} 个PDF文件")
-    return pdf_files
+# 遍历目标文件夹，根据文件后缀进行分类
+for filename in os.listdir(embedding_files_dir):
+    if filename.endswith('.npy'):
+        embedding_path = os.path.join(embedding_files_dir, filename)
+    elif filename.endswith('.json'):
+        combined_text_path = os.path.join(embedding_files_dir, filename)
+    elif filename.endswith('.index'):
+        faiss_index_path = os.path.join(embedding_files_dir, filename)
 
-def extract_titles_from_pdf(pdf_path):
-    """
-    从PDF文件中提取标题。
-    """
-    text = extract_text(pdf_path)
-    lines = text.split('\n')
-    titles = []
-    title_counts = {}
 
-    for i in range(1, len(lines) - 1):
-        if is_title(lines[i], lines[i - 1], lines[i + 1]):
-            title = lines[i]
-            if title in title_counts:
-                title_counts[title] += 1
-                title_with_suffix = f"{title}_{title_counts[title]}"
-                titles.append(title_with_suffix)
-            else:
-                title_counts[title] = 1
-                titles.append(title)
 
-    logger.info(f"在文件 {os.path.basename(pdf_path)} 中找到 {len(titles)} 个标题")
-    return titles
+  #加载向量知识库文件
+def load_embeddings(embedding_path):
+    if os.path.exists(embedding_path):
+        embeddings = np.load(embedding_path)
+        logging.info("嵌入向量文件加载成功。")
+        return embeddings
+    else:
+        logging.error(f"嵌入向量文件 {embedding_path} 未找到。")
+        return None
+  #初始化索引
+def initialize_faiss(faiss_index_path):
+    if os.path.exists(faiss_index_path):
+        faiss_index = faiss.read_index(faiss_index_path)
+        logging.info("FAISS索引加载成功。")
+        return faiss_index
+    else:
+        logging.error("FAISS索引文件未找到。")
+        return None
+    return faiss_index
 
-def clean_titles(titles, filter_keywords=None):
-    """
-    清洗提取出的标题。
-    """
-    if filter_keywords is None:
-        filter_keywords = []
+  #正式的问答流程：**********************************************************************
 
-    cleaned_titles = []
-    for title in titles:
-        if not any(keyword in title for keyword in filter_keywords):
-            cleaned_titles.append(title)
+  #用户问题向量化
+def get_query_vector(message):
+    response = zhipuai.model_api.invoke(model="text_embedding", prompt=message)
+
+    # 检查响应是否成功
+    if response and response.get('success'):
+        # 打印 token 消耗信息
+        usage = response['data'].get('usage', {})
+        prompt_tokens = usage.get('prompt_tokens', '未知')
+        completion_tokens = usage.get('completion_tokens', '未知')
+        total_tokens = usage.get('total_tokens', '未知')
+        logging.info(f"Token 消耗信息 - 提示 Tokens: {prompt_tokens}, 完成 Tokens: {completion_tokens},"
+                     f" 总 Tokens: {total_tokens}")
+
+        # 返回 embedding
+        return response['data']['embedding']
+    else:
+        # 如果响应不成功，仅返回 None
+        return None
+
+  #通过索引向数据库比对返回内容
+def search_in_faiss_index(query_vector, faiss_index, top_k=5):
+    # 在FAISS索引中搜索
+    scores, indices = faiss_index.search(np.array([query_vector]), top_k)
+    logging.info(f"FAISS搜索得分: {scores}, 索引: {indices}")
+    return scores, indices
+
+def get_combined_text(indices, combined_text_path):
+    with open(combined_text_path, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+
+    contents = []
+    page_numbers = []
+    for index in indices[0]:
+        str_index = str(index)  # 将索引转换为字符串
+
+        # 提取匹配的文本内容和页码
+        text_entry = data.get(str_index)  # 使用 .get() 方法避免 KeyError
+        if text_entry:
+            contents.append(text_entry["content"])
+            page_numbers.append(text_entry["page_number"])
         else:
-            logger.info(f"过滤掉的标题: {title}")
-    logger.info(f"过滤后剩余标题数量: {len(cleaned_titles)}")
-    return cleaned_titles
+            logging.warning(f"索引 {str_index} 在 JSON 文件中未找到对应的文本内容。")
 
-def clean_text_block(text_block):
-    """
-    清洗整个文本块，包括标点符号规范化、去除特殊字符、段落合并和去除多余换行。
-    """
-    # 规范化标点符号（将全角标点转换为半角）
-    text_block = re.sub(r'[\u3000\u3001\u3002\uff0c\uff0e\uff1b\uff1f\uff01\uff1a\u201c\u201d\u2018\u2019]',
-                        lambda m: {u'\u3000': ' ', u'\u3001': ',', u'\u3002': '.', u'\uff0c': ',', u'\uff0e': '.',
-                                   u'\uff1b': ';', u'\uff1f': '?', u'\uff01': '!', u'\uff1a': ':',
-                                   u'\u201c': '"', u'\u201d': '"', u'\u2018': "'", u'\u2019': "'"}.get(m.group()),
-                        text_block)
+    images_return = extract_images_from_pages(page_numbers)
 
-    # 去除特殊字符（例如HTML标签和连续的点号）
-    text_block = re.sub(r'<[^>]+>', '', text_block)  # 假设HTML标签是不需要的
-    text_block = re.sub(r'\.{2,}', ' ', text_block)  # 去除连续的点号
-
-    # 这里假设如果一个段落（非空行）后面跟着的是另一个段落（非空行），它们应该合并
-    text_block = re.sub(r'(?<=\S)\n(?=\S)', ' ', text_block)
-
-    # 清除额外的空白字符，包括空格和换行
-    text_block = ' '.join(text_block.split())
-
-    return text_block
+    return contents, images_return
 
 
-def extract_and_save_images(page, page_index, file_name, target_folder_path, picture_map, image_hashes):
-    image_folder_path = os.path.join(target_folder_path, 'Embedding_Files', 'Pictures')
-    os.makedirs(image_folder_path, exist_ok=True)
-    total_images = 0
-    filtered_images = 0
 
-    def compute_image_hash(image):
-        hash_md5 = hashlib.md5()
-        hash_md5.update(image.tobytes())
-        return hash_md5.hexdigest()
 
-    def correct_bbox(bbox, page_bbox):
-        x0, top, x1, bottom = bbox
-        px0, ptop, px1, pbottom = page_bbox
-        x0 = max(x0, px0)
-        top = max(top, ptop)
-        x1 = min(x1, px1)
-        bottom = min(bottom, pbottom)
-        return (x0, top, x1, bottom)
+def extract_images_from_pages(page_numbers):
+    # 去除重复的页码
+    unique_pages = set(page_numbers)
 
-    logger.info(f"Starting image extraction for page {page_index + 1} of {file_name}.")
+    # 读取 Pictures_map.json
+    pictures_map_path = os.path.join(embedding_files_dir, 'Pictures_map.json')
+    with open(pictures_map_path, 'r', encoding='utf-8') as file:
+        pictures_map = json.load(file)
 
-    for image_index, img in enumerate(page.images):
-        bbox = (img['x0'], img['top'], img['x1'], img['bottom'])
-        corrected_bbox = correct_bbox(bbox, page.bbox)
-        cropped_page = page.crop(corrected_bbox)
+    # 寻找匹配的条目
+    matched_images = []
+    for item in pictures_map.values():
+        if item["page"] in unique_pages:
+            matched_images.append(item["image_path"])
 
-        if cropped_page.width == 0 or cropped_page.height == 0:
-            continue
+    return matched_images
 
-        total_images += 1
 
+  #将返回问题加工成最终的模型提问发送请求等待返回
+def generate_response(prompt):
+
+    #接收问题并输出一个队列
+    def process_streaming_output():
+        # 使用zhipuai聊天模型生成回答，开启新线程并进行流式输出
+        response = zhipuai.model_api.sse_invoke(
+            model="chatglm_turbo",
+            prompt=prompt,
+            temperature=0.2,
+            incremental=True
+        )  # 增量返回，否则为全量返回
+        logging.info(f"输入的最终提示词：{prompt}")
+        logging.info(f"全局队列转录进行中")
         try:
-            pil_image = cropped_page.to_image().original
-            image_hash = compute_image_hash(pil_image)
+            for event in response.events():
+                if event.event == "add":
+                    #这里向函数内的队列写入输出内容
+                    shared_output.put(event.data)
+                elif event.event in ["error", "interrupted"]:
+                    break
+                elif event.event == "finish":
+                    print(event.data)
+                    shared_output.put(event.meta)
+                else:
+                    print(event.data)
+        finally:
+            shared_output.put(None)  # 向队列发送结束信号#
 
-            if image_hash not in image_hashes:
-                image_hashes.add(image_hash)
-                image_file_name = f'{file_name}_page_{page_index + 1}_image_{image_index + 1}.png'
-                image_file_path = os.path.join(image_folder_path, image_file_name)
-                pil_image.save(image_file_path, format='PNG')
+    # 启动处理线程
+    threading.Thread(target=process_streaming_output).start()
 
-                image_node_name = f"{file_name}_page_{page_index + 1}_image_{image_index + 1}"
-                picture_map[image_node_name] = {
-                    'page': page_index + 1,
-                    'image_index': image_index + 1,
-                    'image_path': image_file_path
-                }
-            else:
-                filtered_images += 1
-        except Exception as e:
-            logger.error(f"Error processing or saving image: {e}")
-
-    logger.info(f"Image extraction completed for page {page_index + 1} of {file_name}.")
-    logger.info(f"Total images extracted: {total_images - filtered_images}")
-    logger.info(f"Total duplicate images filtered: {filtered_images}")
-
-    pictures_map_file_path = os.path.join(target_folder_path, 'Embedding_Files', 'Pictures_map.json')
-    try:
-        with open(pictures_map_file_path, 'w', encoding='utf-8') as file:
-            json.dump(picture_map, file, ensure_ascii=False, indent=4)
-        logger.info(f"Picture map JSON file saved at '{pictures_map_file_path}'.")
-    except Exception as e:
-        logger.error(f"Error saving picture map JSON file at '{pictures_map_file_path}': {e}")
-
-def split_text_into_blocks(text_content, page_index, file_name, max_length=150, overlap=20):
-    logger.info(f"开始分割文件 '{file_name}' 中的文本")
-    combined_blocks = []
-    block = ''
-    block_index = 0  # 初始化文本块索引
-
-    # 中文常用标点符号，用于辅助判断分割点
-    punctuation = '。！？；，'
-
-    for char in text_content:
-        block += char
-        if len(block) >= max_length or (char in punctuation and len(block) >= max_length - overlap):
-            block_index += 1
-            combined_blocks.append({
-                "content": block.strip(),
-                "page": page_index + 1,
-                "block_index": block_index,
-                "identifier": f"{file_name}_page_{page_index + 1}_block_{block_index}"
-            })
-            block = block[-overlap:]
-
-    # 添加最后一个块（如果有）
-    if block:
-        block_index += 1
-        combined_blocks.append({
-            "content": block.strip(),
-            "page": page_index + 1,
-            "block_index": block_index,
-            "identifier": f"{file_name}_page_{page_index + 1}_block_{block_index}"
-        })
-
-    logger.info(f"文本分割完成，共分割成 {len(combined_blocks)} 个块")
-    return combined_blocks
+    return shared_output
 
 
-def vectorize_block(block):
-    """
-    使用zhipuai库将文本块转换成向量，并在每次请求后增加 0.2 秒的延迟。
-    """
-    try:
-        response = zhipuai.model_api.invoke(
-            model="text_embedding",
-            prompt=block['content']
-        )
-        time.sleep(0.1)  # 请求后延时
-        if response and response.get('code') == 200 and response.get('success'):
-            return response['data']['embedding']
-        else:
-            logger.warning("向量化失败")
-    except Exception as e:
-        logger.error(f"向量化过程中发生异常: {e}")
-    return None
+def GLM_Streaming_response(message):
+    logging.info(f"模型启动程序调用正常")
 
-def convert_blocks_to_vectors(blocks, filename):
-    vectors = []
-    logger.info(f"开始向量化文件 '{filename}'")
+    # 初始化向量和FAISS索引
+    load_embeddings(embedding_path)
+    faiss_index = initialize_faiss(faiss_index_path)
 
-    for i, block in enumerate(tqdm(blocks, desc=f"向量化进度", unit="block")):
-        vector = vectorize_block(block)
-        if vector is not None:
-            vectors.append(vector)
+    # 获取查询的向量转化结果
+    query_vector = get_query_vector(message)
+    if query_vector is None:
+        # 如果无法获取查询向量，则返回错误信息
+        return "无法获取查询向量，请检查问题并重试。"
 
-    logger.info(f"{filename} 向量化完成，共处理 {len(blocks)} 个文本块")
-    return np.array(vectors)
+    # 在FAISS索引中搜索并获取索引
+    scores, indices = search_in_faiss_index(query_vector, faiss_index)
+    if indices is None:
+        # 如果无法在FAISS索引中搜索，则返回错误信息
+        return "搜索FAISS索引时出现问题，请重试。"
 
-def save_document_collection(blocks, filename):
-    """
-    将文本块内容及其相关信息保存为JSON文件。
-    """
-    document_collection = {
-        i: {
-            'content': block['content'],
-            'page': block['page'],
-            'identifier': block['identifier']
-        }
-        for i, block in enumerate(blocks)
-    }
-    collection_path = os.path.join(script_dir, 'Embedding_Files', f"{filename}_collection.json")
-    with open(collection_path, 'w', encoding='utf-8') as file:
-        json.dump(document_collection, file, ensure_ascii=False, indent=4)
-    logger.info(f"{filename} 的文档集合保存完成")
+    # 获取组合文本
+    contents, images_return = get_combined_text(indices, combined_text_path)
+    combined_text = contents
+    if combined_text == "":
+        # 如果组合文本为空，则返回错误信息
+        return "无法获取与查询相关的文本，请重试。"
+
+    # 构建提示信息
+    prompt = f"你是一名专业的飞行教练，使用中文和用户交流。你将提供精确且权威的答案给用户，深入问题所在，利用这些知识：{combined_text}。" \
+             f"找到最合适的解答。如果答案在文档中，则会用文档的原文回答，并指出文档名及页码。若答案不在文档内，你将依据你的专业知识回答，并明确指出。" \
+             f"你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与飞行训练和学习需求紧密相关的专业指导。" \
+             f"请记住，安全永远是首要考虑，负责任的态度对于飞行至关重要。用户的问题是：{message}"
+
+    generate_response(prompt)
 
 
-def save_vectors(vectors, filename):
-    """
-    将向量保存为NumPy文件。
-    """
-    embedding_dir = os.path.join(script_dir, 'Embedding_Files')
-    if not os.path.exists(embedding_dir):
-        os.makedirs(embedding_dir)
-
-    full_path = os.path.join(embedding_dir, f"{filename}_vectors.npy")
-    np.save(full_path, vectors)
-    logger.info(f"{filename}保存完成")
 
 
-def create_and_save_faiss_index(vectors, index_path):
-    """
-    创建并保存FAISS索引。
-    :param vectors: NumPy数组形式的向量
-    :param index_path: 索引保存路径
-    """
-    logger.info("开始创建FAISS索引")
-    # 获取向量维度
-    d = vectors.shape[1]
-    # 创建使用L2距离的Flat索引
-    index = faiss.IndexFlatL2(d)
-    # 添加向量到索引
-    index.add(vectors)
-    # 保存索引到磁盘
-    faiss.write_index(index, index_path)
-    logger.info(f"FAISS索引已保存到 {index_path}")
 
 
-def main():
-    folder_path = 'uploaded_files'
-    filter_keywords = ['过滤词1', '过滤词2']
-
-    # 初始化图片映射字典和图片哈希集合
-    picture_map = {}
-    image_hashes = set()
-
-    # 使用新函数获取PDF文件列表
-    pdf_files = find_pdf_files(folder_path)
-
-    # 统一处理所有PDF文件
-    all_blocks = []
-    for pdf_path in pdf_files:
-        filename = os.path.basename(pdf_path)
-        logger.info(f"正在处理文件：{filename}")
-
-        # 提取和清洗标题（停用）
-        #titles = extract_titles_from_pdf(pdf_path)
-        #cleaned_titles = clean_titles(titles, filter_keywords)
-
-        # 提取和处理文本
-        with open(pdf_path, 'rb') as file:
-            text_content = extract_text(file)
-            cleaned_text = clean_text_block(text_content)
-            blocks = split_text_into_blocks(cleaned_text, 0, filename)  # 假设整个文档视为一页
-            all_blocks.extend(blocks)
-
-        # 处理图片提取
-        with pdfplumber.open(pdf_path) as pdf:
-            for page_index, page in enumerate(pdf.pages):
-                extract_and_save_images(page, page_index, filename, script_dir, picture_map, image_hashes)
-
-    # 向量化所有文本块
-    all_vectors = convert_blocks_to_vectors(all_blocks, "combined")
-
-    # 保存集合文本和向量
-    document_collection_filename = "combined_collection.json"
-    vector_filename = "combined_vectors.npy"
-    save_document_collection(all_blocks, document_collection_filename)
-    save_vectors(all_vectors, vector_filename)
-
-    # 创建并保存FAISS索引
-    faiss_index_path = os.path.join(script_dir, 'Embedding_Files', 'faiss_glm.index')
-    create_and_save_faiss_index(all_vectors, faiss_index_path)
-
-    # 构建文件路径
-    file_paths = {
-        'document_collection': os.path.join(script_dir, 'Embedding_Files', document_collection_filename),
-        'vectors': os.path.join(script_dir, 'Embedding_Files', vector_filename),
-        'faiss_index': faiss_index_path
-    }
-
-    logger.info("所有处理步骤完成。")
-    return file_paths
-
-if __name__ == "__main__":
-    main()

@@ -43,6 +43,7 @@ def find_pdf_files(folder_path):
     logger.info(f"在 {folder_path} 中找到 {len(pdf_files)} 个PDF文件")
     return pdf_files
 
+
 def extract_titles_from_pdf(pdf_path):
     """
     从PDF文件中提取标题。
@@ -66,6 +67,7 @@ def extract_titles_from_pdf(pdf_path):
     logger.info(f"在文件 {os.path.basename(pdf_path)} 中找到 {len(titles)} 个标题")
     return titles
 
+
 def clean_titles(titles, filter_keywords=None):
     """
     清洗提取出的标题。
@@ -82,10 +84,9 @@ def clean_titles(titles, filter_keywords=None):
     logger.info(f"过滤后剩余标题数量: {len(cleaned_titles)}")
     return cleaned_titles
 
+
 def clean_text_block(text_block):
-    """
-    清洗整个文本块，包括标点符号规范化、去除特殊字符、段落合并和去除多余换行。
-    """
+    logger.info("开始清洗文本块")
     # 规范化标点符号（将全角标点转换为半角）
     text_block = re.sub(r'[\u3000\u3001\u3002\uff0c\uff0e\uff1b\uff1f\uff01\uff1a\u201c\u201d\u2018\u2019]',
                         lambda m: {u'\u3000': ' ', u'\u3001': ',', u'\u3002': '.', u'\uff0c': ',', u'\uff0e': '.',
@@ -97,25 +98,31 @@ def clean_text_block(text_block):
     text_block = re.sub(r'<[^>]+>', '', text_block)  # 假设HTML标签是不需要的
     text_block = re.sub(r'\.{2,}', ' ', text_block)  # 去除连续的点号
 
-    # 这里假设如果一个段落（非空行）后面跟着的是另一个段落（非空行），它们应该合并
+    # 合并段落
     text_block = re.sub(r'(?<=\S)\n(?=\S)', ' ', text_block)
 
-    # 清除额外的空白字符，包括空格和换行
+    # 清除额外的空白字符
     text_block = ' '.join(text_block.split())
 
+    # 添加日志记录点
+    logger.info("文本块清洗完成")
+    # 打印清洗后的文本块内容
     return text_block
 
 
 def extract_and_save_images(page, page_index, file_name, target_folder_path, picture_map, image_hashes):
+    logger.info(f"开始提取第 {page_index + 1} 页的图片，文件：{file_name}")
     image_folder_path = os.path.join(target_folder_path, 'Embedding_Files', 'Pictures')
     os.makedirs(image_folder_path, exist_ok=True)
     total_images = 0
     filtered_images = 0
 
+
     def compute_image_hash(image):
         hash_md5 = hashlib.md5()
         hash_md5.update(image.tobytes())
         return hash_md5.hexdigest()
+
 
     def correct_bbox(bbox, page_bbox):
         x0, top, x1, bottom = bbox
@@ -137,6 +144,7 @@ def extract_and_save_images(page, page_index, file_name, target_folder_path, pic
             continue
 
         total_images += 1
+        logger.info(f"图片提取完成，第 {page_index + 1} 页，文件：{file_name}")
 
         try:
             pil_image = cropped_page.to_image().original
@@ -167,62 +175,102 @@ def extract_and_save_images(page, page_index, file_name, target_folder_path, pic
     try:
         with open(pictures_map_file_path, 'w', encoding='utf-8') as file:
             json.dump(picture_map, file, ensure_ascii=False, indent=4)
-        logger.info(f"Picture map JSON file saved at '{pictures_map_file_path}'.")
+        logger.info(f"图片保存完成，第 {page_index + 1} 页，文件：{file_name}")
     except Exception as e:
         logger.error(f"Error saving picture map JSON file at '{pictures_map_file_path}': {e}")
 
-def split_text_into_blocks(text_content, page_index, file_name, max_length=150, overlap=20):
-    logger.info(f"开始分割文件 '{file_name}' 中的文本")
-    combined_blocks = []
-    block = ''
+
+def split_text_into_blocks(text_content, global_page_number, file_name, max_length=150, overlap=20):
+    logger.info(f"开始分割文本块，文件：{file_name}, 页码：{global_page_number}")
+    blocks = []
+    start = 0
+    text_length = len(text_content)
     block_index = 0  # 初始化文本块索引
 
-    # 中文常用标点符号，用于辅助判断分割点
-    punctuation = '。！？；，'
+    while start < text_length:
+        # 计算块的结束位置
+        end = min(start + max_length, text_length)
+        block = text_content[start:end].strip()
 
-    for char in text_content:
-        block += char
-        if len(block) >= max_length or (char in punctuation and len(block) >= max_length - overlap):
+        # 只有在块非空时才处理
+        if block:
             block_index += 1
-            combined_blocks.append({
-                "content": block.strip(),
-                "page": page_index + 1,
-                "block_index": block_index,
-                "identifier": f"{file_name}_page_{page_index + 1}_block_{block_index}"
-            })
-            block = block[-overlap:]
+            # 将页码添加到文本块的开头，并使用特定符号标记
+            formatted_block = f"[{global_page_number}] {block}"
+            blocks.append(formatted_block)
 
-    # 添加最后一个块（如果有）
-    if block:
-        block_index += 1
-        combined_blocks.append({
-            "content": block.strip(),
-            "page": page_index + 1,
-            "block_index": block_index,
-            "identifier": f"{file_name}_page_{page_index + 1}_block_{block_index}"
-        })
+        # 更新下一个块的起始位置
+        start = end if end == text_length else end - overlap
 
-    logger.info(f"文本分割完成，共分割成 {len(combined_blocks)} 个块")
-    return combined_blocks
+        # 添加日志记录点
+        logger.info(f"处理完成一个文本块，文件：{file_name}, 块索引：{block_index}, 页码：{global_page_number}")
+
+    logger.info(f"文本块分割完成，文件：{file_name}, 页码：{global_page_number}")
+    return blocks
 
 
-def vectorize_block(block):
+
+def process_pdf_file(pdf_path, global_page_number, picture_map, image_hashes):
+    all_blocks = []
+    file_name = os.path.basename(pdf_path)
+    logger.info(f"开始处理文件: {file_name}")
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            logger.info(f"打开文件: {file_name}")
+            for page in pdf.pages:
+                global_page_number += 1
+                logger.info(f"处理第 {global_page_number} 页")
+
+                # 文本提取
+                page_text = page.extract_text()
+                if page_text:
+                    logger.info(f"第 {global_page_number} 页提取文本成功")
+                    cleaned_text = clean_text_block(page_text)
+                    logger.info(f"第 {global_page_number} 页文本清洗完成")
+                    blocks = split_text_into_blocks(cleaned_text, global_page_number, file_name)
+                    logger.info(f"第 {global_page_number} 页文本分割完成")
+                    all_blocks.extend(blocks)
+                else:
+                    logger.warning(f"第 {global_page_number} 页无可提取文本")
+
+                # 图片提取
+                extract_and_save_images(page, global_page_number, file_name, script_dir, picture_map, image_hashes)
+
+    except Exception as e:
+        logger.error(f"处理文件 {file_name} 时出错: {e}", exc_info=True)
+
+    return all_blocks, global_page_number
+
+
+
+def vectorize_block(block, retries=30):
     """
     使用zhipuai库将文本块转换成向量，并在每次请求后增加 0.2 秒的延迟。
+    在失败时重试最多 retries 次。
     """
-    try:
-        response = zhipuai.model_api.invoke(
-            model="text_embedding",
-            prompt=block['content']
-        )
-        time.sleep(0.1)  # 请求后延时
-        if response and response.get('code') == 200 and response.get('success'):
-            return response['data']['embedding']
-        else:
-            logger.warning("向量化失败")
-    except Exception as e:
-        logger.error(f"向量化过程中发生异常: {e}")
+    attempt = 0
+    while attempt < retries:
+        try:
+            response = zhipuai.model_api.invoke(
+                model="text_embedding",
+                prompt=block
+            )
+            time.sleep(0.1)  # 请求后延时
+            if response and response.get('code') == 200 and response.get('success'):
+                return response['data']['embedding']
+            else:
+                logger.warning(f"第 {attempt + 1} 次向量化尝试失败")
+                attempt += 1
+                time.sleep(3)  # 在重试之前增加一些延时
+        except Exception as e:
+            logger.error(f"向量化过程中发生异常: {e}")
+            attempt += 1
+            time.sleep(3)  # 在重试之前增加一些延时
+    logger.warning(f"文本块向量化重试 {retries} 次后仍然失败")
     return None
+
+
 
 def convert_blocks_to_vectors(blocks, filename):
     vectors = []
@@ -236,22 +284,27 @@ def convert_blocks_to_vectors(blocks, filename):
     logger.info(f"{filename} 向量化完成，共处理 {len(blocks)} 个文本块")
     return np.array(vectors)
 
+
 def save_document_collection(blocks, filename):
-    """
-    将文本块内容及其相关信息保存为JSON文件。
-    """
-    document_collection = {
-        i: {
-            'content': block['content'],
-            'page': block['page'],
-            'identifier': block['identifier']
-        }
-        for i, block in enumerate(blocks)
-    }
-    collection_path = os.path.join(script_dir, 'Embedding_Files', f"{filename}_collection.json")
+    # 将每个文本块转换为包含页码和内容的字典
+    blocks_dict = {}
+    for i, block in enumerate(blocks):
+        # 分离页码和文本内容
+        match = re.search(r'^\[(\d+)\](.*)', block, re.DOTALL)
+        if match:
+            page_number = int(match.group(1))
+            text_content = match.group(2).strip()
+            blocks_dict[i] = {"page_number": page_number, "content": text_content}
+        else:
+            logger.warning(f"无法从文本块中提取页码：{block}")
+
+    # 保存字典到 JSON 文件
+    collection_path = os.path.join(script_dir, 'Embedding_Files', f"{filename}.json")
     with open(collection_path, 'w', encoding='utf-8') as file:
-        json.dump(document_collection, file, ensure_ascii=False, indent=4)
+        json.dump(blocks_dict, file, ensure_ascii=False, indent=4)
     logger.info(f"{filename} 的文档集合保存完成")
+
+
 
 
 def save_vectors(vectors, filename):
@@ -262,7 +315,7 @@ def save_vectors(vectors, filename):
     if not os.path.exists(embedding_dir):
         os.makedirs(embedding_dir)
 
-    full_path = os.path.join(embedding_dir, f"{filename}_vectors.npy")
+    full_path = os.path.join(embedding_dir, f"{filename}")
     np.save(full_path, vectors)
     logger.info(f"{filename}保存完成")
 
@@ -279,62 +332,72 @@ def create_and_save_faiss_index(vectors, index_path):
     # 创建使用L2距离的Flat索引
     index = faiss.IndexFlatL2(d)
     # 添加向量到索引
-    index.add(vectors)
+    if vectors.size > 0:
+        index.add(vectors)
+        logger.info("向量已成功添加到FAISS索引")
+    else:
+        logger.error("无法添加向量到索引，因为向量数组为空")
     # 保存索引到磁盘
     faiss.write_index(index, index_path)
     logger.info(f"FAISS索引已保存到 {index_path}")
 
 
+
 def main():
     folder_path = 'uploaded_files'
-    filter_keywords = ['过滤词1', '过滤词2']
+    logger.info("程序开始运行")
 
-    # 初始化图片映射字典和图片哈希集合
+    # 初始化图片映射字典
     picture_map = {}
     image_hashes = set()
 
-    # 使用新函数获取PDF文件列表
+    # 获取PDF文件列表
     pdf_files = find_pdf_files(folder_path)
 
-    # 统一处理所有PDF文件
-    all_blocks = []
+    # 初始化文本提取相关变量
+    all_blocks_across_files = []
+    global_page_number = 0  # 全局页码计数器
+    logger.info("开始文本提取、清洗、分割过程")
+
+    # 遍历PDF文件进行文本提取、清洗、分割，图片提取分割、哈希过滤
     for pdf_path in pdf_files:
-        filename = os.path.basename(pdf_path)
-        logger.info(f"正在处理文件：{filename}")
+        logger.info(f"处理文件：{os.path.basename(pdf_path)}")
+        blocks, global_page_number = process_pdf_file(pdf_path, global_page_number, picture_map, image_hashes)
+        all_blocks_across_files.extend(blocks)
+    logger.info("文本提取、清洗、分割过程完成")
 
-        # 提取和清洗标题（停用）
-        #titles = extract_titles_from_pdf(pdf_path)
-        #cleaned_titles = clean_titles(titles, filter_keywords)
+    # 保存处理过的文本块到集合文档
+    logger.info("开始保存处理过的文本块")
+    save_document_collection(all_blocks_across_files, "combined_collection")
+    logger.info("文本块保存完成")
 
-        # 提取和处理文本
-        with open(pdf_path, 'rb') as file:
-            text_content = extract_text(file)
-            cleaned_text = clean_text_block(text_content)
-            blocks = split_text_into_blocks(cleaned_text, 0, filename)  # 假设整个文档视为一页
-            all_blocks.extend(blocks)
-
-        # 处理图片提取
-        with pdfplumber.open(pdf_path) as pdf:
-            for page_index, page in enumerate(pdf.pages):
-                extract_and_save_images(page, page_index, filename, script_dir, picture_map, image_hashes)
+    # 向量化之前的询问步骤
+    proceed = input("是否继续进行向量化？(y/n): ")
+    if proceed.lower() != 'y':
+        logger.info("程序终止。")
+        return
 
     # 向量化所有文本块
-    all_vectors = convert_blocks_to_vectors(all_blocks, "combined")
+    logger.info("开始向量化文本块")
+    all_vectors = convert_blocks_to_vectors(all_blocks_across_files, "combined")
+    logger.info("文本块向量化完成")
 
-    # 保存集合文本和向量
-    document_collection_filename = "combined_collection.json"
-    vector_filename = "combined_vectors.npy"
-    save_document_collection(all_blocks, document_collection_filename)
+    # 保存向量
+    logger.info("开始保存向量")
+    vector_filename = "combined_vectors"
     save_vectors(all_vectors, vector_filename)
+    logger.info("向量保存完成")
 
     # 创建并保存FAISS索引
+    logger.info("开始创建并保存FAISS索引")
     faiss_index_path = os.path.join(script_dir, 'Embedding_Files', 'faiss_glm.index')
     create_and_save_faiss_index(all_vectors, faiss_index_path)
+    logger.info("FAISS索引创建并保存完成")
 
     # 构建文件路径
     file_paths = {
-        'document_collection': os.path.join(script_dir, 'Embedding_Files', document_collection_filename),
-        'vectors': os.path.join(script_dir, 'Embedding_Files', vector_filename),
+        'document_collection': os.path.join(script_dir, 'Embedding_Files', "combined_collection.json"),
+        'vectors': os.path.join(script_dir, 'Embedding_Files', vector_filename+".npy"),
         'faiss_index': faiss_index_path
     }
 

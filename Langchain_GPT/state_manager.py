@@ -21,6 +21,7 @@ class GlobalState:
 
 global_state = GlobalState()
 shared_output = queue.Queue()
+Images_path = []
 
 
 def get_state():
