@@ -1,204 +1,62 @@
-import time
-import logging
-import numpy as np
-import faiss
-import os
-import zhipuai
-import gradio as gr
-import queue
-import json
-import threading
-from state_manager import shared_output
-import re
+from langchain.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-# 设置zhipuai API密钥
-zhipuai.api_key = "1a21c86a3aa8f435250194b3dc9dc6b8.2Aov2pnPfNB7lLPi"
-
-
-#全局变量定义：
-    # 获取当前脚本的绝对路径的目录部分
-script_dir = os.path.dirname(os.path.abspath(__file__))
-embedding_files_dir = os.path.join(script_dir, 'Embedding_Files')
-
-# 初始化变量
-embedding_path = ""
-combined_text_path = ""
-faiss_index_path = ""
-
-# 遍历目标文件夹，根据文件后缀进行分类
-for filename in os.listdir(embedding_files_dir):
-    if filename.endswith('.npy'):
-        embedding_path = os.path.join(embedding_files_dir, filename)
-    elif filename.endswith('.json'):
-        combined_text_path = os.path.join(embedding_files_dir, filename)
-    elif filename.endswith('.index'):
-        faiss_index_path = os.path.join(embedding_files_dir, filename)
-
-
-
-  #加载向量知识库文件
-def load_embeddings(embedding_path):
-    if os.path.exists(embedding_path):
-        embeddings = np.load(embedding_path)
-        logging.info("嵌入向量文件加载成功。")
-        return embeddings
-    else:
-        logging.error(f"嵌入向量文件 {embedding_path} 未找到。")
-        return None
-  #初始化索引
-def initialize_faiss(faiss_index_path):
-    if os.path.exists(faiss_index_path):
-        faiss_index = faiss.read_index(faiss_index_path)
-        logging.info("FAISS索引加载成功。")
-        return faiss_index
-    else:
-        logging.error("FAISS索引文件未找到。")
-        return None
-    return faiss_index
-
-  #正式的问答流程：**********************************************************************
-
-  #用户问题向量化
-def get_query_vector(message):
-    response = zhipuai.model_api.invoke(model="text_embedding", prompt=message)
-
-    # 检查响应是否成功
-    if response and response.get('success'):
-        # 打印 token 消耗信息
-        usage = response['data'].get('usage', {})
-        prompt_tokens = usage.get('prompt_tokens', '未知')
-        completion_tokens = usage.get('completion_tokens', '未知')
-        total_tokens = usage.get('total_tokens', '未知')
-        logging.info(f"Token 消耗信息 - 提示 Tokens: {prompt_tokens}, 完成 Tokens: {completion_tokens},"
-                     f" 总 Tokens: {total_tokens}")
-
-        # 返回 embedding
-        return response['data']['embedding']
-    else:
-        # 如果响应不成功，仅返回 None
-        return None
-
-  #通过索引向数据库比对返回内容
-def search_in_faiss_index(query_vector, faiss_index, top_k=5):
-    # 在FAISS索引中搜索
-    scores, indices = faiss_index.search(np.array([query_vector]), top_k)
-    logging.info(f"FAISS搜索得分: {scores}, 索引: {indices}")
-    return scores, indices
-
-def get_combined_text(indices, combined_text_path):
-    with open(combined_text_path, 'r', encoding='utf-8') as file:
-        data = json.load(file)
-
-    contents = []
-    page_numbers = []
-    for index in indices[0]:
-        str_index = str(index)  # 将索引转换为字符串
-
-        # 提取匹配的文本内容和页码
-        text_entry = data.get(str_index)  # 使用 .get() 方法避免 KeyError
-        if text_entry:
-            contents.append(text_entry["content"])
-            page_numbers.append(text_entry["page_number"])
-        else:
-            logging.warning(f"索引 {str_index} 在 JSON 文件中未找到对应的文本内容。")
-
-    images_return = extract_images_from_pages(page_numbers)
-
-    return contents, images_return
-
-
-
-
-def extract_images_from_pages(page_numbers):
-    # 去除重复的页码
-    unique_pages = set(page_numbers)
-
-    # 读取 Pictures_map.json
-    pictures_map_path = os.path.join(embedding_files_dir, 'Pictures_map.json')
-    with open(pictures_map_path, 'r', encoding='utf-8') as file:
-        pictures_map = json.load(file)
-
-    # 寻找匹配的条目
-    matched_images = []
-    for item in pictures_map.values():
-        if item["page"] in unique_pages:
-            matched_images.append(item["image_path"])
-
-    return matched_images
-
-
-  #将返回问题加工成最终的模型提问发送请求等待返回
-def generate_response(prompt):
-
-    #接收问题并输出一个队列
-    def process_streaming_output():
-        # 使用zhipuai聊天模型生成回答，开启新线程并进行流式输出
-        response = zhipuai.model_api.sse_invoke(
-            model="chatglm_turbo",
-            prompt=prompt,
-            temperature=0.2,
-            incremental=True
-        )  # 增量返回，否则为全量返回
-        logging.info(f"输入的最终提示词：{prompt}")
-        logging.info(f"全局队列转录进行中")
-        try:
-            for event in response.events():
-                if event.event == "add":
-                    #这里向函数内的队列写入输出内容
-                    shared_output.put(event.data)
-                elif event.event in ["error", "interrupted"]:
-                    break
-                elif event.event == "finish":
-                    print(event.data)
-                    shared_output.put(event.meta)
-                else:
-                    print(event.data)
-        finally:
-            shared_output.put(None)  # 向队列发送结束信号#
-
-    # 启动处理线程
-    threading.Thread(target=process_streaming_output).start()
-
-    return shared_output
-
-
-def GLM_Streaming_response(message):
-    logging.info(f"模型启动程序调用正常")
-
-    # 初始化向量和FAISS索引
-    load_embeddings(embedding_path)
-    faiss_index = initialize_faiss(faiss_index_path)
-
-    # 获取查询的向量转化结果
-    query_vector = get_query_vector(message)
-    if query_vector is None:
-        # 如果无法获取查询向量，则返回错误信息
-        return "无法获取查询向量，请检查问题并重试。"
-
-    # 在FAISS索引中搜索并获取索引
-    scores, indices = search_in_faiss_index(query_vector, faiss_index)
-    if indices is None:
-        # 如果无法在FAISS索引中搜索，则返回错误信息
-        return "搜索FAISS索引时出现问题，请重试。"
-
-    # 获取组合文本
-    contents, images_return = get_combined_text(indices, combined_text_path)
-    combined_text = contents
-    if combined_text == "":
-        # 如果组合文本为空，则返回错误信息
-        return "无法获取与查询相关的文本，请重试。"
-
-    # 构建提示信息
-    prompt = f"你是一名专业的飞行教练，使用中文和用户交流。你将提供精确且权威的答案给用户，深入问题所在，利用这些知识：{combined_text}。" \
-             f"找到最合适的解答。如果答案在文档中，则会用文档的原文回答，并指出文档名及页码。若答案不在文档内，你将依据你的专业知识回答，并明确指出。" \
-             f"你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与飞行训练和学习需求紧密相关的专业指导。" \
-             f"请记住，安全永远是首要考虑，负责任的态度对于飞行至关重要。用户的问题是：{message}"
-
-    generate_response(prompt)
-
-
-
-
-
-
+chat_model = ChatOpenAI(openai_api_key="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",
+                        model_name="gpt-3.5-turbo", temperature=0.7)
+text_block = """15.1.3 标准单词和词组备注
+下列标准单词在通话中具有特定的含义。
+一、请认收(向我表示你已经收到并理解该电报)。
+二、是的(是的)。
+三、同意(批准所申请的行动)。
+四、还有(表示电报各部分的间断；用于电文与电报的其他部分无明显区别的情况。如果信息的各个部分
+之间没有明显的区别可以使用该词作为信息各部分之间的间隔标志)。
+五、另外(表示在非常繁忙的情况下，发布给不同航空器的电报之间的间断)。
+六、取消(废除此前所发布的许可)。
+七、检查(检查系统或程序，且通常不回答)。
+八、可以(批准按指定条件前行)。
+九、证实(我是否已经准确地收到了…？或你是否已经准确地收到了本电报？)。
+十、联系(与……建立无线电联系)。
+十一、正确(你所讲的是正确的)。
+十二、更正(在本电报出了一个错误，或所发布的信息本身是错的，正确的内容应当是……)。
+十三、作废(当作信息没有发送)。
+十四、信号怎样(我所发电报的清晰度如何？)。
+十五、我重复一遍(为了表示澄清或强调，我重复一遍)。
+十六、守听(收听或调定到某个频率)。
+十七、错误或不同意(并非如此，或不允许，或不对)。
+十八、请复诵(请向我准确地重复本电报所有或部分内容)。
+十九、重新许可(此前发布给你的许可已经变更，这一新的许可将取代刚才的许可或其中部分内容)。
+二十、报告(向我传达下列情报)。
+二十一、请求(我希望知道……或我希望得到……)。
+二十二、收到(我已经收到了你刚才的发话)。
+注：任何情况下，不得采用“对”或者“不对”来回答要求复诵的问题。
+二十三、再说或重复一遍(请重复你刚才发话的所有内容或下列部分)。
+二十四、讲慢点(请降低你的语速)。
+二十五、稍等或等待(请等候，我将呼叫你)。
+二十六、核实(与发电方进行检查和确认)。
+二十七、照办(“将照办”的缩略语，我已经明白了你的电报并将按照该电报执行)。
+二十八、讲两遍。
+1.对于申请来说：通信困难，请把每个词(组)发送两遍。
+2.对于信息来说：因为通信困难，该电报的每个词(组)将被发送两遍。
+样题
+如果航空器驾驶员在报告的过程中出现错误并立即修改时，应说的标准词为？"""
+formatted_prompt = (
+        "提取文档中某一个段落的内容，理解它并将它设计成一个选择题，每题有四个选项（A、B、C）。请按照以下格式提供每个问题的信息：\n"
+        "- title: 根据文档中的某个段落随机编写一道选择题，注意这里写入的不是一个简短的标题而是一个引用自文档中某段原文改写而来的完整的问题，题目和答案之间的对应关系应当清洗明确\n"
+        "- type: 题目类型，例如 '单选题'\n"
+        "- option_list: 一个包含三个选项的列表，每个选项都是一个字典，包含 'content' 和 'id' 键。例如: "
+        '[{"content":"选项A内容","id":"A"}, {"content":"选项B内容","id":"B"}, {"content":"选项C内容","id":"C"}，'
+        ' {"content":"选项D内容","id":"C"}]\n'
+        "- answer: 正确答案的ID，例如 'A'\n"
+        "- explain: 答案解释\n"
+        "- del_flag: 删除标志，用于表示题目是否已被删除，例如 '0' 代表未删除\n"
+        "- create_by: 题目创建者，例如 'admin'\n"
+        "- create_time: 题目创建时间，格式为 'MM/DD/YYYY HH:MM:SS'\n"
+        "- update_by: 题目最后更新者，例如 'admin'\n"
+        "- update_time: 题目最后更新时间，格式为 'MM/DD/YYYY HH:MM:SS'\n\n"
+        "这里是知识点内容：\n"
+        f"{text_block}"
+    )
+prompt = formatted_prompt
+messages = [HumanMessage(content=prompt)]
+response = chat_model.invoke(messages, )
+print(response.content)

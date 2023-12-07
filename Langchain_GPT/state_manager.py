@@ -22,7 +22,7 @@ class GlobalState:
 global_state = GlobalState()
 shared_output = queue.Queue()
 Images_path = []
-
+glm_chat_history = []
 
 def get_state():
     global_state.thread_stop_event = threading.Event()

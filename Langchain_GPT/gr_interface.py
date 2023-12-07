@@ -88,7 +88,7 @@ with gr.Blocks(theme=theme) as ui:
                     temporary_Upload = gr.Button("保存模板", min_width=88)
 
         with gr.Column():
-            example_image = gr.Gallery(label="相关图片", show_download_button=True, columns=[3], rows=[1], height="auto")  #preview=Ture(缩略图模式)
+            example_image = gr.Gallery(label="相关图片", show_download_button=True, columns=[4], rows=[1], height="auto")  #preview=Ture(缩略图模式)
             file_upload = gr.File(label="上传文件", file_count="multiple")
             FileExplorer = gr.FileExplorer(label="知识库文件管理器", root=embedding_files_dir)
             gr.Markdown("日志调试台.")

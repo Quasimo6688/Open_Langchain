@@ -12,6 +12,7 @@ import threading
 import state_manager
 from state_manager import shared_output
 from state_manager import Images_path
+from state_manager import glm_chat_history
 import re
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -88,11 +89,12 @@ def get_query_vector(message):
         return None
 
   #通过索引向数据库比对返回内容
-def search_in_faiss_index(query_vector, faiss_index, top_k=5):
+def search_in_faiss_index(query_vector, faiss_index, top_k=6):
     # 在FAISS索引中搜索
     scores, indices = faiss_index.search(np.array([query_vector]), top_k)
     logging.info(f"FAISS搜索得分: {scores}, 索引: {indices}")
     return scores, indices
+
 
 def get_combined_text(indices, combined_text_path, pictures_index_path):
     # 从合并的 JSON 文件中读取内容
@@ -124,8 +126,6 @@ def get_combined_text(indices, combined_text_path, pictures_index_path):
 
 
 
-
-
 def extract_images_from_pages(page_numbers, pictures_index_path):
     print("关联的页码", page_numbers)
     # 去除重复的页码
@@ -145,21 +145,17 @@ def extract_images_from_pages(page_numbers, pictures_index_path):
 
 
   #将返回问题加工成最终的模型提问发送请求等待返回
-def generate_response(prompt):
-    # 获取聊天历史并将其包含在提问中
-    # 假设我们仅包含最近的5条聊天记录，您可以根据需要调整这个数字
-    chat_context = "\n".join(state_manager.chat_history[-5:])
-    final_prompt = chat_context + "\n" + prompt
+def generate_response(final_prompt):
 
     def process_streaming_output():
         # 使用zhipuai聊天模型生成回答，开启新线程并进行流式输出
         response = zhipuai.model_api.sse_invoke(
             model="chatglm_turbo",
-            prompt=prompt,
+            prompt=final_prompt,
             temperature=0.2,
             incremental=True
         )  # 增量返回，否则为全量返回
-        logging.info(f"输入的最终提示词：{prompt}")
+        logging.info(f"输入的最终提示词：{final_prompt}")
         logging.info(f"全局队列转录进行中")
         try:
             for event in response.events():
@@ -178,32 +174,25 @@ def generate_response(prompt):
 
     # 启动处理线程
     threading.Thread(target=process_streaming_output).start()
+    # 收集模型的回复
+    model_response = ""
+    while True:
+        output = shared_output.get()
+        if output is None:
+            break
+        model_response += output
+    return model_response
 
-    return shared_output
 
-def create_chat_history(message, prompt, model_response):
-    """
-    更新聊天历史并创建包含当前提问和之前聊天历史的完整提问。
-
-    参数:
-    message (str): 用户的原始问题。
-    prompt (str): 加工后输入模型的文本块。
-    model_response (str): 模型的回答。
-
-    返回:
-    str: 包含当前提问和之前聊天历史的完整提问。
-    """
-
-    # 将用户的原始问题和模型的回答添加到聊天历史中
-    state_manager.chat_history.append("用户: " + message)
-    state_manager.chat_history.append("机器人: " + model_response)
-
+def create_chat_history(prompt):
     # 获取包含上下文的聊天历史
-    # 这里仅包含最近的5条记录，可根据需求调整
-    chat_context = "\n".join(state_manager.chat_history[-8:])
-
+    formatting_prompt = {"role": "user", "content": prompt}
+    #提取最近的20条记录
+    chat_memory = (state_manager.glm_chat_history[-20:])
+    #将组装好的提示词组装进聊天历史中
+    final_prompt = chat_memory.append(formatting_prompt)
     # 返回包含上下文的完整提问
-    return chat_context + "\n" + prompt
+    return final_prompt
 
 
 def GLM_Streaming_response(message):
@@ -238,8 +227,14 @@ def GLM_Streaming_response(message):
              f"你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确保用户会获得与飞行训练和学习需求紧密相关的专业指导。" \
              f"请记住，安全永远是首要考虑，负责任的态度对于飞行最重要。用户的问题是：{message}"
 
-    prompt_by_history = create_chat_history(message, prompt, model_response)
-    generate_response(prompt_by_history)
+    final_prompt = create_chat_history(prompt)
+    AI_answer = generate_response(final_prompt)
+
+    formatting_AI_answer =  {"role": "assistant", "content": AI_answer}
+    formatting_User_message =  {"role": "user", "content": message}
+    # 将模型的回答添加到聊天历史中
+    state_manager.glm_chat_history.append(formatting_User_message)
+    state_manager.glm_chat_history.append(formatting_AI_answer)
 
 
 

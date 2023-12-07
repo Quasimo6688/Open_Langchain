@@ -7,12 +7,15 @@ import zhipuai
 import queue
 import json
 import threading
-from state_manager import shared_output
+import state_manager
+from state_manager import shared_output, Images_path, glm_chat_history
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.responses import FileResponse
 from pydantic import BaseModel
 import random
+from fastapi.responses import JSONResponse
+import re
 
 class DialogueRequest(BaseModel):
     message: str
@@ -32,13 +35,18 @@ embedding_files_dir = os.path.join(script_dir, 'Embedding_Files')
 embedding_path = ""
 combined_text_path = ""
 faiss_index_path = ""
+pictures_index_path = ""  # 新增变量，用于图片索引文件
 
-# 遍历目标文件夹，根据文件后缀进行分类
+# 遍历目标文件夹，根据文件名进行分类
 for filename in os.listdir(embedding_files_dir):
     if filename.endswith('.npy'):
         embedding_path = os.path.join(embedding_files_dir, filename)
     elif filename.endswith('.json'):
-        combined_text_path = os.path.join(embedding_files_dir, filename)
+        # 根据文件名中的关键词来区分不同的 JSON 文件
+        if "collection" in filename:  # 假设向量集合文本文件包含 "collection" 关键词
+            combined_text_path = os.path.join(embedding_files_dir, filename)
+        elif "Pictures" in filename:  # 假设图片索引文件包含 "pictures" 关键词
+            pictures_index_path = os.path.join(embedding_files_dir, filename)
     elif filename.endswith('.index'):
         faiss_index_path = os.path.join(embedding_files_dir, filename)
 
@@ -93,21 +101,51 @@ def search_in_faiss_index(query_vector, faiss_index, top_k=7):
     logging.info(f"FAISS搜索得分: {scores}, 索引: {indices}")
     return scores, indices
 
-def get_combined_text(indices, combined_text_path):
+def get_combined_text(indices, combined_text_path, pictures_index_path):
     # 从合并的 JSON 文件中读取内容
     with open(combined_text_path, 'r', encoding='utf-8') as file:
         combined_data = json.load(file)
 
-    # 根据索引获取相应的文本块，并提取每个文本块的 'content' 字段
-    text_blocks = [combined_data[str(index)]['content'] for index in indices[0]]  # 每个索引对应一个文本块的 'content'
+    contents = []
+    page_numbers = []
+    for index in indices[0]:  # 假设 indices 是一维数组
+        adjusted_index = str(index - 1)  # 调整索引（Python索引从0开始）
 
-    logging.info(f"通过索引找到的文本块: {text_blocks}")
+        if adjusted_index in combined_data:
+            text_entry = combined_data[adjusted_index]
+            contents.append(text_entry.get("content", "No content found"))
+            page_number = text_entry.get("page_number")
+            if page_number is not None:
+                page_numbers.append(int(page_number))  # 确保是整数
+            else:
+                logging.warning(f"找不到索引 {adjusted_index} 的页码")
+        else:
+            logging.warning(f"索引 {adjusted_index} 在 JSON 文件中未找到对应的文本内容")
 
-    # 拼接文本块中的内容
-    combined_result = "\n".join(text_blocks)
-    return combined_result
+    state_manager.Images_path = extract_images_from_pages(page_numbers, pictures_index_path)
+    # 调试打印
+
+    print("State_manager.Images_path 类型:", type(state_manager.Images_path))
+    print("State_manager.Images_path 内容:", state_manager.Images_path)
+    return contents
 
 
+def extract_images_from_pages(page_numbers, pictures_index_path):
+    print("关联的页码", page_numbers)
+    # 去除重复的页码
+    unique_pages = set(page_numbers)
+    print("去重后的页码", unique_pages)
+    # 读取 Pictures_map.json
+    with open(pictures_index_path, 'r', encoding='utf-8') as file:
+        pictures_map = json.load(file)
+
+    # 寻找匹配的条目
+    matched_images = []
+    for item in pictures_map.values():
+        if item["page"] in unique_pages:
+            matched_images.append(item["image_path"])
+    print("匹配到的路径", matched_images)
+    return matched_images
   #将返回问题加工成最终的模型提问发送请求等待返回
 def generate_response(prompt):
 
@@ -162,7 +200,7 @@ def GLM_Streaming_response(message):
         return "搜索FAISS索引时出现问题，请重试。"
 
     # 获取组合文本
-    combined_text = get_combined_text(indices, combined_text_path)
+    combined_text = get_combined_text(indices, combined_text_path, pictures_index_path)
     if combined_text == "":
         # 如果组合文本为空，则返回错误信息
         return "无法获取与查询相关的文本，请重试。"
@@ -196,7 +234,7 @@ async def dialogue(dialogue_request: DialogueRequest):
 
                 accumulated_output += data  # 累积接收到的数据
                 print(f"\r流式输出数据：{accumulated_output}", end="")  # 在同一行更新显示所有累积的数据
-                yield f"data: {json.dumps({'message': data})}\n\n"
+                yield f"data: {json.dumps(data)}\n\n"
 
         headers = {
             'Content-Type': 'text/event-stream',
@@ -211,18 +249,18 @@ async def dialogue(dialogue_request: DialogueRequest):
         logging.error(f"Exception: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/random-image/")
-async def send_random_image():
-    # 获取程序所在目录
-    program_directory = os.path.dirname(__file__)
-    folder_path = os.path.join(program_directory, "Embedding_Files", "Pictures")
-    pictures = [file for file in os.listdir(folder_path) if file.endswith(".jpg")]
-    if pictures:
-        selected_picture = random.choice(pictures)
-        image_path = os.path.join(folder_path, selected_picture)
-        return FileResponse(image_path)
-    else:
-        return HTTPException(status_code=404, detail="No images found")
+@app.get("/return-image/")
+async def return_image():
+    # 调用函数获取 matched_images
+    matched_images = state_manager.Images_path
+
+    if not matched_images:
+        # 如果列表为空，返回404错误
+        raise HTTPException(status_code=404, detail="No matched images available")
+
+    # 返回整个列表
+    return JSONResponse({"images": matched_images})
+
 
 
 if __name__ == "__main__":
