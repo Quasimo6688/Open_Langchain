@@ -137,7 +137,7 @@ def extract_images_from_pages(page_numbers, pictures_index_path):
 
     # 寻找匹配的条目
     matched_images = []
-    for item in pictures_map.values():
+    for key, item in pictures_map.items():
         if item["page"] in unique_pages:
             matched_images.append(item["image_path"])
     print("匹配到的路径", matched_images)
@@ -224,6 +224,7 @@ def GLM_Streaming_response(message):
     # 构建提示信息
     prompt = f"你是一名专业的飞行教练，用中文交流。你将提供精确权威简洁的答案，深入问题所在，利用这些文档：{combined_text}。" \
              f"构建最合适的解答。如果答案在文档中，则尽量使用文档的原文组织答案。若文档内容与问题无关，则礼貌和用户互动。你将依据你的专业知识回答，并明确指出。" \
+             f"当回答问题中有例如：1.2.3或其他的各种内容分段时，请让回答的段落格式整齐些。" \
              f"你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确保用户会获得与飞行训练和学习需求紧密相关的专业指导。" \
              f"请记住，安全永远是首要考虑，负责任的态度对于飞行最重要。用户的问题是：{message}"
 

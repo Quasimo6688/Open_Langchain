@@ -8,7 +8,7 @@ import queue
 import json
 import threading
 import state_manager
-from state_manager import shared_output, Images_path, glm_chat_history
+from state_manager import shared_output, Images_path, glm_chat_history, If_run
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.responses import FileResponse
@@ -123,10 +123,7 @@ def get_combined_text(indices, combined_text_path, pictures_index_path):
             logging.warning(f"索引 {adjusted_index} 在 JSON 文件中未找到对应的文本内容")
 
     state_manager.Images_path = extract_images_from_pages(page_numbers, pictures_index_path)
-    # 调试打印
-
-    print("State_manager.Images_path 类型:", type(state_manager.Images_path))
-    print("State_manager.Images_path 内容:", state_manager.Images_path)
+    state_manager.If_run = True
     return contents
 
 
@@ -135,17 +132,26 @@ def extract_images_from_pages(page_numbers, pictures_index_path):
     # 去除重复的页码
     unique_pages = set(page_numbers)
     print("去重后的页码", unique_pages)
+
+    # 确保 unique_pages 中的所有元素都是整数
+    unique_pages = set(map(int, unique_pages))
+
     # 读取 Pictures_map.json
     with open(pictures_index_path, 'r', encoding='utf-8') as file:
         pictures_map = json.load(file)
 
     # 寻找匹配的条目
     matched_images = []
-    for item in pictures_map.values():
+    for key, item in pictures_map.items():
+        # 确保比较时类型一致
         if item["page"] in unique_pages:
             matched_images.append(item["image_path"])
+
     print("匹配到的路径", matched_images)
     return matched_images
+
+
+
   #将返回问题加工成最终的模型提问发送请求等待返回
 def generate_response(prompt):
 
@@ -167,8 +173,6 @@ def generate_response(prompt):
                     shared_output.put(event.data)
                 elif event.event in ["error", "interrupted"]:
                     break
-                elif event.event == "finish":
-                    shared_output.put(event.meta)
                 else:
                     print(event.data)
         finally:
@@ -208,7 +212,8 @@ def GLM_Streaming_response(message):
     # 构建提示信息
     prompt = f"你是一名专业的飞行教练，使用中文和用户交流。你将提供精确且权威的答案给用户，深入问题所在，利用这些知识：{combined_text}。" \
              f"找到最合适的解答。如果答案在文档中，则会用文档的原文回答，并指出文档名及页码。若答案不在文档内，你将依据你的专业知识回答，并明确指出。" \
-             f"你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与飞行训练和学习需求紧密相关的专业指导。" \
+             f"你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与飞行训练和学习需求紧密相关的专业指导。回答" \
+             f"的内容请排版为整齐有序的格式" \
              f"请记住，安全永远是首要考虑，负责任的态度对于飞行至关重要。用户的问题是：{message}"
 
     output = generate_response(prompt)
@@ -217,7 +222,7 @@ def GLM_Streaming_response(message):
 
   ##################Fast_API接口封装#######################
 
-@app.post("/dialogue/")
+@app.get("/dialogue/")
 async def dialogue(dialogue_request: DialogueRequest):
     try:
         output_queue = GLM_Streaming_response(dialogue_request.message)
@@ -249,16 +254,20 @@ async def dialogue(dialogue_request: DialogueRequest):
         logging.error(f"Exception: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/return-image/")
-async def return_image():
-    # 调用函数获取 matched_images
+@app.get("/return-image")
+async def return_image(name: str = None):
+    while not state_manager.If_run:
+        # 如果 If_run 为 False，则等待
+        print("程序暂停，等待中...")
+        time.sleep(1)
+
+        # 当 If_run 为 True，退出循环并继续执行
     matched_images = state_manager.Images_path
 
-    if not matched_images:
-        # 如果列表为空，返回404错误
-        raise HTTPException(status_code=404, detail="No matched images available")
+    # 在返回之前将 If_run 设置为 False
+    state_manager.If_run = False
 
-    # 返回整个列表
+    # 返回图片列表
     return JSONResponse({"images": matched_images})
 
 
