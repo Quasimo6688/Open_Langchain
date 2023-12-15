@@ -25,7 +25,7 @@ def fetch_image_urls_github_api(repo, branch, path, token, output_dir, rate_limi
         os.makedirs(output_dir)
         print(f"创建目录: {output_dir}")
 
-    output_file = os.path.join(output_dir, 'URL_Pictures_map.json')
+    output_file = os.path.join(output_dir, 'URL_Pic_map.json')
     with open(output_file, 'w', encoding='utf-8') as file:
         json.dump(image_urls, file, indent=4, ensure_ascii=False)
 

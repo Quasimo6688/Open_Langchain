@@ -35,6 +35,6 @@ def update_image_paths(url_map_file, pictures_map_file, base_dir):
 
 # 使用示例
 base_dir = 'Embedding_Files'  # 程序所在位置的Embedding_Files文件夹
-url_map_file = 'URL_Pictures_map.json'  # URL_Pictures_map文件名
+url_map_file = 'URL_Pic_map.json'  # URL_Pictures_map文件名
 pictures_map_file = 'Pictures_map.json'  # Pictures_map文件名
 update_image_paths(url_map_file, pictures_map_file, base_dir)

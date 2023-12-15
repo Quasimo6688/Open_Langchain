@@ -7,24 +7,24 @@ import zhipuai
 import queue
 import json
 import threading
-from fastapi import FastAPI, HTTPException, Query, APIRouter, BackgroundTasks, Request
-from fastapi.responses import StreamingResponse
 from starlette.responses import FileResponse
 import random
-from fastapi.responses import JSONResponse
 import re
 from pydantic import BaseModel, Field
 from typing import Optional
 import asyncio
+import gradio as gr
 
-app = FastAPI()
-session_dict = {}
 
 class SessionState:
     def __init__(self):
         self.images_path = []
         self.is_ready = False
         self.output_queue = asyncio.Queue()
+
+
+
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 # 设置zhipuai API密钥
@@ -122,17 +122,17 @@ async def generate_response(prompt, session_state):
             logging.info("内部队列转录进行中")
             for event in response.events():
                 if event.event == "add":
-                    logging.info(f"Stream Output: {event.data}")  # 添加此日志记录
+                    logging.info(f"Stream Output: {event.data}")
                     await session_state.output_queue.put(event.data)
                 elif event.event in ["error", "interrupted"]:
                     break
                 else:
                     print(event.data)
         finally:
-            await session_state.output_queue.put(None)  # 向队列发送结束信号
+            await session_state.output_queue.put(None)
             session_state.is_ready = True
 
-    # 启动异步任务来处理流式输出
+    # 在后台运行 process_streaming_output
     asyncio.create_task(process_streaming_output())
 
 async def GLM_Streaming_response(message, session_state):
@@ -146,47 +146,35 @@ async def GLM_Streaming_response(message, session_state):
     combined_text = get_combined_text(indices, combined_text_path, pictures_index_path, session_state)
     if combined_text == "":
         raise ValueError("无法获取与查询相关的文本，请重试。")
-    prompt = f"你是一名专业的飞行教练，使用中文和用户交流。你将提供精确且权威的答案给用户，深入问题所在，利用这些知识：{combined_text}。" \
-             f"找到最合适的解答。如果答案在文档中，则会用文档的原文回答，并指出文档名及页码。若答案不在文档内，你将依据你的专业知识回答，" \
-             f"并明确指出。你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与飞行训练和学习需求紧密" \
+    prompt = f"你是一名专业的游戏行业从业者，使用中文和用户交流。你将提供精确且权威的答案给用户，深入问题所在，利用这些知识：{combined_text}。" \
+             f"找到最合适的解答。如果答案在文档中，则会用文档的原文回答，并指出文档名及页码。若答案和文档内容无关，你将依据你的专业知识回答，" \
+             f"并明确指出。你的回答将专注于游戏开发领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与游戏开发和学习需求紧密" \
              f"相关的专业指导。回答的内容请排版为整齐有序的格式。" \
-             f"请记住，安全永远是首要考虑，负责任的态度对于飞行至关重要。用户的问题是：{message}"
+             f"用户的问题是：{message}"
     await generate_response(prompt, session_state)
     return session_state.output_queue
 
-@app.get("/dialogue/")
-async def dialogue(background_tasks: BackgroundTasks, message: str, session_id: str):
-    local_state = SessionState()
-    session_dict[session_id] = local_state
-    await GLM_Streaming_response(message, local_state)
-
-    async def event_generator():
-        while True:
-            data = await local_state.output_queue.get()
-            if data is None:
-                break
-            yield f"data: {json.dumps(data)}\n\n"
-
-    headers = {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no'
-    }
-    return StreamingResponse(event_generator(), headers=headers)
-
-@app.get("/return-image")
-async def return_image(session_id: str):
-    start_time = time.time()
+# 定义处理用户输入和用户ID的函数
+async def handle_input(user_input, user_id):
+    session_state = SessionState()
+    await GLM_Streaming_response(user_input, session_state)
+    response_str = ""
     while True:
-        if time.time() - start_time > 30:
-            return JSONResponse({"images": []})
-        if session_id in session_dict and session_dict[session_id].is_ready:
-            matched_images = session_dict[session_id].images_path
-            del session_dict[session_id]
-            return JSONResponse({"images": matched_images})
-        await asyncio.sleep(1)
+        response = await session_state.output_queue.get()
+        if response is None:
+            break
+        response_str += response
+        yield response_str
 
+# 创建 Gradio 界面
+iface = gr.Interface(
+    fn=handle_input,
+    inputs=["text", "text"],  # 第一个 text 是用户问题，第二个 text 是用户ID
+    outputs="text",
+    title="游戏开发助手",
+    description="输入你的相关问题和一个任意用户ID，获取专业的回答。"
+)
+
+# 运行 Gradio 界面
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    iface.launch(share=True)
