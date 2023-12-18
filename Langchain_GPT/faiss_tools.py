@@ -13,11 +13,11 @@ import concurrent.futures
 import pdfplumber
 from tqdm import tqdm
 import re
-import hashlib
+import imagehash
 import io
 from io import BytesIO
 from PIL import Image
-
+import cv2
 
 # 初始化日志配置
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -110,74 +110,94 @@ def clean_text_block(text_block):
     return text_block
 
 
-def extract_and_save_images(page, page_index, file_name, target_folder_path, picture_map, image_hashes):
+def extract_and_save_images(page, page_index, file_name, target_folder_path, picture_map):
     logger.info(f"开始提取第 {page_index + 1} 页的图片，文件：{file_name}")
     image_folder_path = os.path.join(target_folder_path, 'Embedding_Files', 'Pictures')
     os.makedirs(image_folder_path, exist_ok=True)
-    total_images = 0
-    filtered_images = 0
 
+    # 设置更高的渲染分辨率
+    render_resolution = 600  # 提高分辨率以提高提取精度
+    full_page_image = page.to_image(resolution=render_resolution).original
+    rendered_width, rendered_height = full_page_image.size
 
-    def compute_image_hash(image):
-        hash_md5 = hashlib.md5()
-        hash_md5.update(image.tobytes())
-        return hash_md5.hexdigest()
+    # 获取页面的原始尺寸
+    original_width, original_height = page.width, page.height
 
+    # 计算缩放比例
+    scale_x = rendered_width / original_width
+    scale_y = rendered_height / original_height
 
-    def correct_bbox(bbox, page_bbox):
-        x0, top, x1, bottom = bbox
-        px0, ptop, px1, pbottom = page_bbox
-        x0 = max(x0, px0)
-        top = max(top, ptop)
-        x1 = min(x1, px1)
-        bottom = min(bottom, pbottom)
-        return (x0, top, x1, bottom)
-
-    logger.info(f"Starting image extraction for page {page_index + 1} of {file_name}.")
-
-    for image_index, img in enumerate(page.images):
-        bbox = (img['x0'], img['top'], img['x1'], img['bottom'])
-        corrected_bbox = correct_bbox(bbox, page.bbox)
-        cropped_page = page.crop(corrected_bbox)
-
-        if cropped_page.width == 0 or cropped_page.height == 0:
-            continue
-
-        total_images += 1
-        logger.info(f"图片提取完成，第 {page_index + 1} 页，文件：{file_name}")
+    for image_index, img_meta in enumerate(page.images):
+        logger.info(f"处理第 {page_index + 1} 页的第 {image_index + 1} 张图片")
 
         try:
-            pil_image = cropped_page.to_image().original
-            image_hash = compute_image_hash(pil_image)
+            # 根据缩放比例调整坐标并裁剪图片
+            x0, top, x1, bottom = img_meta['x0'], img_meta['top'], img_meta['x1'], img_meta['bottom']
+            x0, top, x1, bottom = x0 * scale_x, top * scale_y, x1 * scale_x, bottom * scale_y
+            pil_image = full_page_image.crop((x0, top, x1, bottom))
 
-            if image_hash not in image_hashes:
-                image_hashes.add(image_hash)
-                image_file_name = f'{file_name}_page_{page_index + 1}_image_{image_index + 1}.png'
-                image_file_path = os.path.join(image_folder_path, image_file_name)
-                pil_image.save(image_file_path, format='PNG')
+            image_file_name = f'{os.path.basename(file_name)}_page_{page_index + 1}_image_{image_index + 1}.png'
+            image_file_path = os.path.join(image_folder_path, image_file_name)
+            pil_image.save(image_file_path, format='PNG')
+            logger.info(f"图片保存成功：{image_file_path}")
 
-                image_node_name = f"{file_name}_page_{page_index + 1}_image_{image_index + 1}"
-                picture_map[image_node_name] = {
-                    'page': page_index + 1,
-                    'image_index': image_index + 1,
-                    'image_path': image_file_path
-                }
-            else:
-                filtered_images += 1
+            image_node_name = f"{os.path.basename(file_name)}_page_{page_index + 1}_image_{image_index + 1}"
+            picture_map[image_node_name] = {
+                'page': page_index + 1,
+                'image_index': image_index + 1,
+                'image_path': image_file_path
+            }
         except Exception as e:
-            logger.error(f"Error processing or saving image: {e}")
-
-    logger.info(f"Image extraction completed for page {page_index + 1} of {file_name}.")
-    logger.info(f"Total images extracted: {total_images - filtered_images}")
-    logger.info(f"Total duplicate images filtered: {filtered_images}")
+            logger.error(f"处理第 {page_index + 1} 页的第 {image_index + 1} 张图片时出错：{e}")
 
     pictures_map_file_path = os.path.join(target_folder_path, 'Embedding_Files', 'Pictures_map.json')
     try:
         with open(pictures_map_file_path, 'w', encoding='utf-8') as file:
             json.dump(picture_map, file, ensure_ascii=False, indent=4)
-        logger.info(f"图片保存完成，第 {page_index + 1} 页，文件：{file_name}")
+        logger.info(f"Pictures_map JSON文件保存成功：{pictures_map_file_path}")
     except Exception as e:
-        logger.error(f"Error saving picture map JSON file at '{pictures_map_file_path}': {e}")
+        logger.error(f"保存pictures_map JSON文件时出错：{e}")
+
+
+def remove_duplicate_images(picture_map, threshold=5):
+    """
+    删除相似度高的重复图片。
+    :param picture_map: 包含图片路径的字典。
+    :param threshold: 哈希比较的阈值，值越小表示相似度越高。
+    """
+    hashes = {}
+    duplicates = []
+
+    for key, value in picture_map.items():
+        image_path = value['image_path']
+        if os.path.exists(image_path):
+            try:
+                with Image.open(image_path) as img:
+                    hash = imagehash.phash(img)
+                    if any(hash - h < threshold for h in hashes.values()):
+                        duplicates.append(key)
+                    else:
+                        hashes[key] = hash
+            except Exception as e:
+                logger.error(f"处理图片 {image_path} 时出错: {e}")
+
+    # 记录删除的图片数量
+    num_duplicates = len(duplicates)
+    logger.info(f"找到并准备删除 {num_duplicates} 个重复图片")
+
+    # 删除重复图片
+    for key in duplicates:
+        image_path = picture_map[key]['image_path']
+        if os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+                logger.info(f"删除图片：{image_path}")
+            except Exception as e:
+                logger.error(f"删除图片时出错：{e}")
+        del picture_map[key]
+
+    logger.info(f"共删除了 {num_duplicates} 个重复图片")
+    return picture_map
 
 
 def split_text_into_blocks(text_content, global_page_number, file_name, max_length=150, overlap=20):
@@ -210,7 +230,7 @@ def split_text_into_blocks(text_content, global_page_number, file_name, max_leng
 
 
 
-def process_pdf_file(pdf_path, global_page_number, picture_map, image_hashes):
+def process_pdf_file(pdf_path, global_page_number, picture_map):
     all_blocks = []
     file_name = os.path.basename(pdf_path)
     logger.info(f"开始处理文件: {file_name}")
@@ -235,7 +255,7 @@ def process_pdf_file(pdf_path, global_page_number, picture_map, image_hashes):
                     logger.warning(f"第 {global_page_number} 页无可提取文本")
 
                 # 图片提取
-                extract_and_save_images(page, global_page_number, file_name, script_dir, picture_map, image_hashes)
+                extract_and_save_images(page, global_page_number, file_name, script_dir, picture_map)
 
     except Exception as e:
         logger.error(f"处理文件 {file_name} 时出错: {e}", exc_info=True)
@@ -349,7 +369,6 @@ def main():
 
     # 初始化图片映射字典
     picture_map = {}
-    image_hashes = set()
 
     # 获取PDF文件列表
     pdf_files = find_pdf_files(folder_path)
@@ -362,9 +381,12 @@ def main():
     # 遍历PDF文件进行文本提取、清洗、分割，图片提取分割、哈希过滤
     for pdf_path in pdf_files:
         logger.info(f"处理文件：{os.path.basename(pdf_path)}")
-        blocks, global_page_number = process_pdf_file(pdf_path, global_page_number, picture_map, image_hashes)
+        blocks, global_page_number = process_pdf_file(pdf_path, global_page_number, picture_map)
         all_blocks_across_files.extend(blocks)
     logger.info("文本提取、清洗、分割过程完成")
+
+    picture_map = remove_duplicate_images(picture_map)
+    logger.info("图片去重完成")
 
     # 保存处理过的文本块到集合文档
     logger.info("开始保存处理过的文本块")

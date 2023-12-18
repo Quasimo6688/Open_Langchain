@@ -108,8 +108,8 @@ def extract_images_from_pages(page_numbers, pictures_index_path):
     matched_images = [item["image_path"] for key, item in pictures_map.items() if item["page"] in unique_pages]
     return matched_images
 
-async def generate_response(prompt, session_state):
-    async def process_streaming_output():
+async def generate_response(prompt, session_state, headers):
+    def process_streaming_output():
         logging.info("模型正常启动")
         try:
             response = zhipuai.model_api.sse_invoke(
@@ -122,28 +122,29 @@ async def generate_response(prompt, session_state):
             logging.info("内部队列转录进行中")
             for event in response.events():
                 if event.event == "add":
-                    logging.info(f"Stream Output: {event.data}")  # 添加此日志记录
-                    await session_state.output_queue.put(event.data)
+                    logging.info(f"Stream Output: {event.data}")
+                    yield f"data: {json.dumps(event.data)}\n\n"
                 elif event.event in ["error", "interrupted"]:
                     break
                 else:
                     print(event.data)
         finally:
-            await session_state.output_queue.put(None)  # 向队列发送结束信号
             session_state.is_ready = True
 
-    # 启动异步任务来处理流式输出
-    asyncio.create_task(process_streaming_output())
+    return StreamingResponse(process_streaming_output(), headers=headers)
 
-async def GLM_Streaming_response(message, session_state):
+
+async def GLM_Streaming_response(message, session_state, headers):
     query_vector = get_query_vector(message)
     if query_vector is None:
         raise ValueError("无法获取查询向量，请检查问题并重试。")
     faiss_index = initialize_faiss(faiss_index_path)
     scores, indices = search_in_faiss_index(query_vector, faiss_index)
+    logging.info(f"向量搜索正常启动")
     if indices is None:
         raise ValueError("搜索FAISS索引时出现问题，请重试。")
     combined_text = get_combined_text(indices, combined_text_path, pictures_index_path, session_state)
+    logging.info(f"文本索引正常启动")
     if combined_text == "":
         raise ValueError("无法获取与查询相关的文本，请重试。")
     prompt = f"你是一名专业的飞行教练，使用中文和用户交流。你将提供精确且权威的答案给用户，深入问题所在，利用这些知识：{combined_text}。" \
@@ -151,21 +152,13 @@ async def GLM_Streaming_response(message, session_state):
              f"并明确指出。你的回答将专注于航空领域的专业知识，旨在直接且有效地帮助用户解决问题。请确信，用户会获得与飞行训练和学习需求紧密" \
              f"相关的专业指导。回答的内容请排版为整齐有序的格式。" \
              f"请记住，安全永远是首要考虑，负责任的态度对于飞行至关重要。用户的问题是：{message}"
-    await generate_response(prompt, session_state)
-    return session_state.output_queue
+    return await generate_response(prompt, session_state, headers)
+
 
 @app.get("/dialogue/")
-async def dialogue(background_tasks: BackgroundTasks, message: str, session_id: str):
+async def dialogue(message: str, session_id: str):
     local_state = SessionState()
     session_dict[session_id] = local_state
-    await GLM_Streaming_response(message, local_state)
-
-    async def event_generator():
-        while True:
-            data = await local_state.output_queue.get()
-            if data is None:
-                break
-            yield f"data: {json.dumps(data)}\n\n"
 
     headers = {
         'Content-Type': 'text/event-stream',
@@ -173,7 +166,10 @@ async def dialogue(background_tasks: BackgroundTasks, message: str, session_id: 
         'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no'
     }
-    return StreamingResponse(event_generator(), headers=headers)
+
+    response = await GLM_Streaming_response(message, local_state, headers)
+
+    return response
 
 @app.get("/return-image")
 async def return_image(session_id: str):
@@ -190,3 +186,4 @@ async def return_image(session_id: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

@@ -123,17 +123,17 @@ async def generate_response(prompt, session_state):
             for event in response.events():
                 if event.event == "add":
                     logging.info(f"Stream Output: {event.data}")
-                    await session_state.output_queue.put(event.data)
+                    yield f"data: {json.dumps(event.data)}\n\n"  # 直接生成流式响应
                 elif event.event in ["error", "interrupted"]:
                     break
                 else:
                     print(event.data)
         finally:
-            await session_state.output_queue.put(None)
-            session_state.is_ready = True
+            yield "data: null\n\n"  # 发送结束信号
 
-    # 在后台运行 process_streaming_output
-    asyncio.create_task(process_streaming_output())
+    return generate_response  # 返回生成器函数
+
+
 
 async def GLM_Streaming_response(message, session_state):
     query_vector = get_query_vector(message)
@@ -175,6 +175,6 @@ iface = gr.Interface(
     description="输入你的相关问题和一个任意用户ID，获取专业的回答。"
 )
 
-# 运行 Gradio 界面
+# 启用队列和运行 Gradio 界面
 if __name__ == "__main__":
-    iface.launch(share=True)
+    iface.queue().launch(share=True)
