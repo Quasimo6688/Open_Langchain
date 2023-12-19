@@ -159,9 +159,9 @@ def extract_and_save_images(page, page_index, file_name, target_folder_path, pic
         logger.error(f"保存pictures_map JSON文件时出错：{e}")
 
 
-def remove_duplicate_images(picture_map, threshold=5):
+def remove_duplicate_images(picture_map, threshold=3):
     """
-    删除相似度高的重复图片。
+    移动相似度高的重复图片到 'Del_Pic' 文件夹。
     :param picture_map: 包含图片路径的字典。
     :param threshold: 哈希比较的阈值，值越小表示相似度越高。
     """
@@ -183,20 +183,26 @@ def remove_duplicate_images(picture_map, threshold=5):
 
     # 记录删除的图片数量
     num_duplicates = len(duplicates)
-    logger.info(f"找到并准备删除 {num_duplicates} 个重复图片")
+    logger.info(f"找到 {num_duplicates} 个重复图片，准备移动到 'Del_Pic' 文件夹")
 
-    # 删除重复图片
+    # 获取 'Del_Pic' 文件夹的路径
+    del_pic_folder = os.path.join(script_dir, 'Embedding_Files', 'Pictures', 'Del_Pic')
+
+    # 移动重复图片
     for key in duplicates:
         image_path = picture_map[key]['image_path']
         if os.path.exists(image_path):
             try:
-                os.remove(image_path)
-                logger.info(f"删除图片：{image_path}")
+                # 生成新路径
+                new_path = os.path.join(del_pic_folder, os.path.basename(image_path))
+                # 移动文件
+                os.rename(image_path, new_path)
+                logger.info(f"移动图片：{image_path} -> {new_path}")
             except Exception as e:
-                logger.error(f"删除图片时出错：{e}")
+                logger.error(f"移动图片时出错：{e}")
         del picture_map[key]
 
-    logger.info(f"共删除了 {num_duplicates} 个重复图片")
+    logger.info(f"共移动了 {num_duplicates} 个重复图片到 'Del_Pic' 文件夹")
     return picture_map
 
 
